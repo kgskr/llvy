@@ -33,8 +33,8 @@ Riot API를 사용하지 않고 `.rofl` 메타데이터를 직접 파싱합니�
 기존 기록은 활성 상태와 원래 날짜를 유지합니다. 새 앱 배포 전에 `npm run db:migrate`를 적용하세요.
 
 앱은 [llvy.vercel.app](https://llvy.vercel.app)에 배포했고 로그인 화면 응답을 확인했습니다.
-**서비스 전체 검증은 아직 끝나지 않았습니다.** Neon·Blob 연결, 공유 비밀번호 설정,
-운영 DB 마이그레이션과 실제 업로드 검증이 남아 있습니다. 실제 솔랭 `.rofl` 샘플은 확보했으며,
+**서비스 전체 검증은 아직 끝나지 않았습니다.** Neon Production 연결과 운영 DB 마이그레이션 3개는
+완료했으며, Blob 연결·공유 비밀번호 설정과 실제 업로드 검증이 남아 있습니다. 실제 솔랭 `.rofl` 샘플은 확보했으며,
 30MB 브라우저 직접 업로드와 배포 환경의 전체 흐름은 아래 절차로 확인해야 합니다.
 현재 증거는 [운영 배포 확인 기록](docs/validation/2026-10-04-production-deployment.md),
 남은 항목은 OpenSpec `replay-ingestion-mvp/tasks.md`에서 관리합니다.

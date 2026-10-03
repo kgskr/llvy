@@ -18,16 +18,44 @@ DB·Blob 또는 로그인 이후 처리 흐름이 정상이라는 증거는 아�
 
 ## 연결 상태와 남은 검증
 
-Chrome의 Vercel 대시보드에서 프로젝트 환경변수가 비어 있음을 확인했다.
-팀에는 기존 `llvy-neon-db`, `llvy-blob` 리소스가 있지만 프로젝트의 연결 대상으로 표시된다.
-현재 이 기록은 연결이나 마이그레이션 완료를 증명하지 않는다.
+최초 확인 시 프로젝트 환경변수는 비어 있었다. 이후 Chrome의 Vercel 대시보드에서 기존
+`llvy-neon-db`를 `llvy`의 **Production에만** 연결했다. 프로젝트 환경변수 목록에서
+`POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`이 Production의 Secret 변수로 생성된 것을 확인했다.
+변수 값은 공개하거나 저장소에 복사하지 않았다.
+
+Vercel의 Neon Query에서 적용 전 DB를 조회했다. DB명은 `neondb`, 현재 스키마는 `public`이며,
+`public` 테이블 목록은 비어 있고 `drizzle.__drizzle_migrations`도 없었다.
+전체 스키마 조회에서는 Neon 관리용 `neon_auth` 테이블 9개만 확인했다.
+앱 마이그레이션의 대상은 `public`·`drizzle`이며 이 관리용 테이블은 변경하지 않는다.
+
+## 운영 DB 마이그레이션
+
+`0000_init.sql`, `0001_new_scream.sql`, `0002_match_management.sql`을 운영 DB에 적용했다.
+Vercel Query는 단일 prepared statement만 허용하므로, 원문 SQL과 Drizzle 이력 INSERT를
+하나의 `DO` 문 안에서 원자적으로 실행했다. `public`·`drizzle`에 기존 relation이 있으면
+DDL 전에 중단하도록 검사했으며, 별도 `neon_auth` 스키마는 대상으로 삼지 않았다.
+같은 SQL의 정상 적용·재실행 거부·기존 데이터 보존·중간 실패 롤백은 PGlite에서도 확인했다.
+
+적용 후 운영 DB의 읽기 전용 쿼리에서 다음을 확인했다.
+
+- 앱 테이블 5개: `members`, `riot_accounts`, `games`, `game_participants`, `pending_uploads`.
+- `games.played_at_override`, `games.excluded_at`과 활성·제외 경기 조회 인덱스 2개.
+- `neon_auth` 테이블 9개 보존.
+- Drizzle 이력 3행의 hash·timestamp가 저장소 원본 및 설치된 migrator와 일치.
+
+| Migration               | created_at      | SHA-256                                                            |
+| ----------------------- | --------------- | ------------------------------------------------------------------ |
+| `0000_init`             | `1782745103949` | `444d2028df3548efd6f4c5cc8e4ce336d635f72e30c0cb0e87d5f3473acd99c1` |
+| `0001_new_scream`       | `1784605417381` | `05ae293e0157014db9020a2efabab79597003e2d3155cc4e786c503cdd22fea3` |
+| `0002_match_management` | `1791039652248` | `6043d11c0f4600d5ac3071eb74396f93bedfc678ca4bc97e361bb30671a3668e` |
+
+## 남은 검증
 
 다음 항목을 완료한 뒤 서비스 전체 검증을 마무리한다.
 
-1. 기존 Neon·Blob을 필요한 배포 환경에 연결하고 `POSTGRES_URL`, `BLOB_READ_WRITE_TOKEN`을 확인한다.
+1. 기존 Blob을 Production에 연결하고 `BLOB_READ_WRITE_TOKEN`을 확인한다.
 2. 공유 비밀번호를 설정하고 변경된 환경변수를 배포에 반영한다.
-3. 기존 DB의 테이블·Drizzle 적용 이력을 조회한 뒤 미적용 SQL 마이그레이션만 적용한다.
-4. 인증 후 실제 솔랭 리플레이의 업로드·파싱·저장·조회와 중복 처리를 확인한다.
-5. 30MB 파일의 브라우저→Blob 직접 전송, 비-rofl 거부와 관련 상태·원본 보존을 확인한다.
+3. 인증 후 실제 솔랭 리플레이의 업로드·파싱·저장·조회와 중복 처리를 확인한다.
+4. 30MB 파일의 브라우저→Blob 직접 전송, 비-rofl 거부와 관련 상태·원본 보존을 확인한다.
 
 원본 리플레이와 환경변수 값은 저장소에 게시하지 않았다.
