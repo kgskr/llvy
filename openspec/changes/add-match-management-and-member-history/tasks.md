@@ -18,6 +18,8 @@
 - [x] 3.3 실제 화면에서 제외/복구·날짜 변경·모임원 전적 흐름을 검증한다
 - [x] 3.4 README에 기능/집계 기준/마이그레이션을 기록하고 OpenSpec strict 검증을 통과한다
 
-검증 기록: `docs/validation/2026-10-04-mvp-features.md`. 브라우저 검증은 합성 데이터를
-넣은 로컬 PGlite 환경에서 수행했다. 운영 마이그레이션과 외부 배포 검증은 기존
-`replay-ingestion-mvp`의 남은 작업으로 유지한다.
+초기 검증 기록: `docs/validation/2026-10-04-mvp-features.md`. 브라우저 검증은 합성 데이터를
+넣은 로컬 PGlite 환경에서 수행했다. 이후 운영 DB에 마이그레이션 3개를 적용하고 운영 Chrome에서
+경기 날짜 수정·원본 복원·제외·복구도 확인했다. 합성 테스트 경기는 최종적으로 제외 상태로
+보존했다. 운영 배포와 후속 검증 결과는
+`docs/validation/2026-10-04-production-deployment.md`에 기록한다.

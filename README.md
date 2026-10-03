@@ -32,12 +32,14 @@ Riot API를 사용하지 않고 `.rofl` 메타데이터를 직접 파싱합니�
 추가 마이그레이션은 `games.excluded_at`과 `games.played_at_override`를 추가합니다.
 기존 기록은 활성 상태와 원래 날짜를 유지합니다. 새 앱 배포 전에 `npm run db:migrate`를 적용하세요.
 
-앱은 [llvy.vercel.app](https://llvy.vercel.app)에 배포했고 로그인 화면 응답을 확인했습니다.
-**서비스 전체 검증은 아직 끝나지 않았습니다.** Neon·비공개 Blob Production 연결, 공유 비밀번호 설정과
-운영 DB 마이그레이션 3개는 완료했습니다. 변경 설정의 배포 반영과 실제 업로드 검증이 남아 있습니다. 실제 솔랭 `.rofl` 샘플은 확보했으며,
-30MB 브라우저 직접 업로드와 배포 환경의 전체 흐름은 아래 절차로 확인해야 합니다.
-현재 증거는 [운영 배포 확인 기록](docs/validation/2026-10-04-production-deployment.md),
-남은 항목은 OpenSpec `replay-ingestion-mvp/tasks.md`에서 관리합니다.
+앱은 [llvy.vercel.app](https://llvy.vercel.app)에 배포했으며, Neon·비공개 Blob Production 연결과
+운영 DB 마이그레이션 3개를 적용했습니다. 운영 Chrome에서 실제 솔랭 리플레이의
+업로드·저장·10인 상세 조회·중복 방지와 30MiB 합성 리플레이의 직접 업로드를 확인했습니다.
+비-rofl 파일과 손상된 리플레이의 거부, 경기 날짜 수정·원본 복원도 확인했습니다.
+경기 제외·복구, 비공개 원본의 비인증 접근 거부와 중복·실패 Blob 정리까지 확인했습니다.
+현재 기본 목록에는 실제 솔랭 경기 1개가 있으며, 합성 테스트 경기는 제외 상태로 보존했습니다.
+현재 증거와 검증 범위는 [운영 배포 확인 기록](docs/validation/2026-10-04-production-deployment.md),
+MVP 완료 항목은 OpenSpec `replay-ingestion-mvp/tasks.md`에서 관리합니다.
 
 ## 환경 변수
 
@@ -228,10 +230,11 @@ Blob 삭제/readback과 Postgres 롤백은 로컬에서 완전히 재현되지 �
 - 패치 13.20(2023-10) 무렵 일부 구버전 리플레이는 참가자 통계가 비어 있어 "지원 불가"로
   거부됩니다. 제공된 패치 `16.19.821.7343`의 솔랭 샘플 1개는 정상 처리했으며,
   다른 패치와 사용자설정 게임의 호환성은 별도 검증이 필요합니다.
-- 업로드된 .rofl은 Vercel Blob에 **public**(URL을 아는 사람은 접근 가능)으로,
-  추측 불가능한 UUID가 포함된 경로 `replays/<uploadId>.rofl`에 저장됩니다. 다른
-  게임의 blob URL은 화면에 노출되지 않습니다. 완전 비공개가 필요하면 인증된
-  스트리밍 라우트로 다운로드를 제공하도록 바꿔야 합니다.
+- 업로드된 .rofl은 추측 불가능한 UUID를 포함한 `replays/<uploadId>.rofl` 경로에 저장됩니다.
+  운영 스토어는 **private**이며 서버가 업로드 바인딩을 검증한 뒤 인증된 요청으로 읽습니다.
+  운영 원본 URL에 인증 없이 직접 접근하면 `Forbidden`으로 거부됨을 확인했습니다.
+  `BLOB_ACCESS=public`인 기존 스토어도 지원하며, 이 모드에서는 URL을 아는 사람이 원본에
+  접근할 수 있습니다. Blob URL은 게임 화면에 노출하지 않습니다.
 - 로그인 스로틀(전역 + 클라이언트 힌트별)과 실패 지연은 **서버리스 인스턴스별
   인메모리 상태**입니다. 인스턴스가 여러 개면 그 수만큼 예산이 늘어나므로, 운영
   강화 시 같은 키 구조 그대로 Vercel KV/Upstash 등 공유 스토어로 교체하세요
