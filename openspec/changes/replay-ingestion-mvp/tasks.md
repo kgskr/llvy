@@ -3,7 +3,7 @@
 - [x] 1.1 Next.js(App Router) + TypeScript 프로젝트를 초기화하고 ESLint/포맷터 등 기본 구성을 추가한다
 - [x] 1.2 의존성 추가: `drizzle-orm`, `drizzle-kit`, `@vercel/postgres`, `@vercel/blob`
 - [x] 1.3 환경변수 스키마/예시(`.env.example`) 작성: `UPLOAD_PASSWORD`, `POSTGRES_*`, `BLOB_READ_WRITE_TOKEN`
-- [ ] 1.4 Vercel 프로젝트·Vercel Postgres·Blob 스토어 프로비저닝 및 환경변수 연결(배포 환경)
+- [x] 1.4 Vercel 프로젝트·Vercel Postgres·Blob 스토어 프로비저닝 및 환경변수 연결(배포 환경) — Neon·비공개 Blob을 Production에 연결하고 DB URL·Blob 토큰·공유 비밀번호·BLOB_ACCESS 설정 확인
 
 ## 2. 데이터베이스 스키마 (Drizzle)
 
@@ -79,4 +79,4 @@
 솔랭 `KR-8398474046.rofl`(18,517,442 bytes)을 제공받아 로컬 처리·저장·조회도 검증했다.
 실파일 검증은 `LLVY_REPLAY_FILE`을 지정한 `npm run test:replay`로 재실행할 수 있다.
 30MB 브라우저→Blob 전송, 사용자설정 게임의 포지션 특성, Neon 다중 연결 경합 및 배포 환경의
-전체 흐름 검증을 대체하지 않는다. 1.4, 4.4, 6.7, 9.2는 서비스 연결 후 완료한다.
+전체 흐름 검증을 대체하지 않는다. 4.4, 6.7, 9.2는 운영 브라우저 검증 후 완료한다.

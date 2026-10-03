@@ -186,6 +186,12 @@ export async function POST(request: Request): Promise<NextResponse> {
     const response = await fetch(boundBlobUrl, {
       signal: AbortSignal.timeout(20_000),
       redirect: "error",
+      cache: "no-store",
+      // Authenticate private reads only after store/path/nonce validation.
+      // Use fetch instead of the SDK get() to keep redirects forbidden.
+      ...(store.access === "private"
+        ? { headers: { authorization: `Bearer ${store.token}` } }
+        : {}),
     });
     if (!response.ok) {
       // The binding is consumed either way, so clear any blob left behind.

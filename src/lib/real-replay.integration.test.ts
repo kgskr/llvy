@@ -71,6 +71,7 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
     await database.resetTestDatabase();
     vi.clearAllMocks();
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_replay-test_secret");
+    vi.stubEnv("BLOB_ACCESS", "public");
     authorizedUrls.clear();
     fetchReplay.mockImplementation(async (input) => {
       const url = input instanceof Request ? input.url : String(input);

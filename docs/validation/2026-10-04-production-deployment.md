@@ -16,12 +16,17 @@ DB·Blob 또는 로그인 이후 처리 흐름이 정상이라는 증거는 아�
 빌드 로그 조회 도구가 서버에서 제공되지 않아 상세 빌드 로그는 확인하지 못했다.
 빌드·배포 완료는 GitHub 성공 상태와 Vercel `READY` 상태로 확인했다.
 
-## 연결 상태와 남은 검증
+## 연결 상태
 
 최초 확인 시 프로젝트 환경변수는 비어 있었다. 이후 Chrome의 Vercel 대시보드에서 기존
 `llvy-neon-db`를 `llvy`의 **Production에만** 연결했다. 프로젝트 환경변수 목록에서
 `POSTGRES_URL`, `POSTGRES_URL_NON_POOLING`이 Production의 Secret 변수로 생성된 것을 확인했다.
 변수 값은 공개하거나 저장소에 복사하지 않았다.
+
+기존 **비공개** `llvy-blob`도 Production에 연결했다. 연결 목록과 프로젝트 환경변수에서
+`BLOB_READ_WRITE_TOKEN` 생성을 확인했으며, 사용자가 `UPLOAD_PASSWORD`를 Production의
+Secret 변수로 직접 저장했다. 저장소 접근 방식은 Config 변수 `BLOB_ACCESS=private`로 설정했다.
+이 설정의 재배포·실제 업로드 검증은 아래 미완료 항목으로 관리한다.
 
 Vercel의 Neon Query에서 적용 전 DB를 조회했다. DB명은 `neondb`, 현재 스키마는 `public`이며,
 `public` 테이블 목록은 비어 있고 `drizzle.__drizzle_migrations`도 없었다.
@@ -51,11 +56,20 @@ DDL 전에 중단하도록 검사했으며, 별도 `neon_auth` 스키마는 대�
 
 ## 남은 검증
 
+기존 코드가 공개 Blob만 전제로 하던 점을 수정했다. `BLOB_ACCESS`를 서버에서 검증하고
+클라이언트에는 접근 모드만 전달한다. 비공개 파일은 저장소·경로·nonce를 검증한 뒤에만
+동일 스토어의 원본 URL로 Bearer 인증을 전송하며, 리디렉션 차단과 다운로드 제한 시간을 유지한다.
+독립 코드 검토에서 차단할 결함은 발견되지 않았다.
+
+제공된 실제 솔랭 리플레이를 `LLVY_REPLAY_FILE`로 지정한 `npm run check`가 통과했다.
+20개 테스트 파일·360개 테스트, ESLint, TypeScript, Next.js production build, Prettier를 포함한다.
+이는 실제 비공개 Blob 전송 성공을 증명하지 않으므로 아래 브라우저 검증을 계속한다.
+
 다음 항목을 완료한 뒤 서비스 전체 검증을 마무리한다.
 
-1. 기존 Blob을 Production에 연결하고 `BLOB_READ_WRITE_TOKEN`을 확인한다.
-2. 공유 비밀번호를 설정하고 변경된 환경변수를 배포에 반영한다.
-3. 인증 후 실제 솔랭 리플레이의 업로드·파싱·저장·조회와 중복 처리를 확인한다.
-4. 30MB 파일의 브라우저→Blob 직접 전송, 비-rofl 거부와 관련 상태·원본 보존을 확인한다.
+1. 변경된 코드와 환경변수를 배포에 반영하고 로그인을 확인한다.
+2. 인증 후 실제 솔랭 리플레이의 업로드·파싱·저장·조회와 중복 처리를 확인한다.
+3. 30MB 파일의 브라우저→Blob 직접 전송, 비-rofl 거부와 관련 상태·원본 보존을 확인한다.
+4. 저장된 비공개 Blob 원본의 비인증 접근이 거부되는지 확인한다.
 
 원본 리플레이와 환경변수 값은 저장소에 게시하지 않았다.

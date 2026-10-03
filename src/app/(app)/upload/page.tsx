@@ -18,6 +18,7 @@ type PendingUploadBinding = {
   uploadId: string;
   nonce: string;
   pathname: string;
+  access: "public" | "private";
 };
 
 export default function UploadPage() {
@@ -70,14 +71,19 @@ export default function UploadPage() {
       const binding = (await beginResponse.json()) as PendingUploadBinding & {
         error?: string;
       };
-      if (!beginResponse.ok || !binding.uploadId || !binding.nonce) {
+      if (
+        !beginResponse.ok ||
+        !binding.uploadId ||
+        !binding.nonce ||
+        (binding.access !== "public" && binding.access !== "private")
+      ) {
         throw new Error(binding.error ?? "업로드를 시작하지 못했습니다.");
       }
 
       // 2) Direct upload to the reserved pathname; the binding rides along as
       //    clientPayload so the token route can verify it.
       const blob = await upload(binding.pathname, file, {
-        access: "public",
+        access: binding.access,
         handleUploadUrl: "/api/blob/upload",
         contentType: "application/octet-stream",
         clientPayload: JSON.stringify({

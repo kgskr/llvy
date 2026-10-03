@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getBlobStoreConfig } from "@/lib/blob-store";
 import { createPendingUpload } from "@/lib/pending-upload-store";
 import { hasValidSession } from "@/lib/session";
 
@@ -43,6 +44,16 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
   }
 
+  let access: "public" | "private";
+  try {
+    ({ access } = getBlobStoreConfig());
+  } catch {
+    return NextResponse.json(
+      { error: "Upload storage is unavailable." },
+      { status: 503 },
+    );
+  }
   const created = await createPendingUpload();
-  return NextResponse.json(created);
+  // Expose only the store's access mode, never its read/write credential.
+  return NextResponse.json({ ...created, access });
 }

@@ -52,6 +52,7 @@ describe("POST /api/process", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", blobToken);
+    vi.stubEnv("BLOB_ACCESS", "public");
     vi.mocked(hasValidSession).mockResolvedValue(true);
     vi.mocked(getPendingUpload).mockResolvedValue({
       id: uploadId,
@@ -116,6 +117,7 @@ describe("POST /api/process", () => {
     expect(fetch).toHaveBeenCalledWith(blobUrl, {
       signal: expect.any(AbortSignal),
       redirect: "error",
+      cache: "no-store",
     });
     expect(ingestReplay).toHaveBeenCalledWith(
       expect.objectContaining({ blobUrl }),
@@ -125,6 +127,51 @@ describe("POST /api/process", () => {
       abortSignal: expect.any(AbortSignal),
     });
   });
+
+  it("authenticates only the canonical private object and cleans its duplicate", async () => {
+    vi.stubEnv("BLOB_ACCESS", "private");
+    vi.stubEnv("BLOB_STORE_ID", "different-store");
+    vi.stubEnv("VERCEL_OIDC_TOKEN", "different-authority");
+    vi.mocked(ingestReplay).mockResolvedValue({ ...result, duplicate: true });
+    const privateUrl = `https://test.private.blob.vercel-storage.com/${pathname}`;
+    const response = await POST(
+      request({ ...payload, blobUrl: `${privateUrl}?download=1#replay` }),
+    );
+    expect(response.status).toBe(200);
+    expect(claimPendingUpload).toHaveBeenCalledWith(uploadId, privateUrl);
+    expect(fetch).toHaveBeenCalledExactlyOnceWith(privateUrl, {
+      signal: expect.any(AbortSignal),
+      redirect: "error",
+      cache: "no-store",
+      headers: { authorization: `Bearer ${blobToken}` },
+    });
+    expect(ingestReplay).toHaveBeenCalledWith(
+      expect.objectContaining({ blobUrl: privateUrl }),
+    );
+    expect(del).toHaveBeenCalledExactlyOnceWith(privateUrl, {
+      token: blobToken,
+      abortSignal: expect.any(AbortSignal),
+    });
+  });
+
+  it.each([
+    blobUrl,
+    `https://other.private.blob.vercel-storage.com/${pathname}`,
+    `https://test.private.blob.vercel-storage.com:8443/${pathname}`,
+    `https://user:password@test.private.blob.vercel-storage.com/${pathname}`,
+    "https://test.private.blob.vercel-storage.com/replays/another.rofl",
+  ])(
+    "rejects an unbound private-mode URL before sending credentials: %s",
+    async (url) => {
+      vi.stubEnv("BLOB_ACCESS", "private");
+      const response = await POST(request({ ...payload, blobUrl: url }));
+      expect(response.status).toBe(400);
+      expect(claimPendingUpload).not.toHaveBeenCalled();
+      expect(fetch).not.toHaveBeenCalled();
+      expect(del).not.toHaveBeenCalled();
+      expect(ingestReplay).not.toHaveBeenCalled();
+    },
+  );
 
   it.each(["RIOT_ID_TAG_LINE", "TEAM_POSITION", "WIN"])(
     "cleans a malformed %s rejected by the real parser with a 422 response",

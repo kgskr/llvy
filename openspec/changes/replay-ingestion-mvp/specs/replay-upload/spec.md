@@ -24,6 +24,11 @@ The system SHALL upload `.rofl` files directly from the browser to Vercel Blob s
 - **WHEN** an authorized user selects a file that is not a `.rofl` file
 - **THEN** the system rejects the file before or during upload and informs the user that only `.rofl` replays are accepted
 
+#### Scenario: A replay is uploaded to a private store
+- **WHEN** the connected store is private and the server is configured with `BLOB_ACCESS=private`
+- **THEN** the browser uses private access for the direct upload and the server authenticates reads of the exact bound object without exposing the read/write token to the browser
+- **AND** a URL outside the configured store or reserved pathname is rejected before any authenticated read or deletion
+
 ### Requirement: Duplicate replay prevention
 
 The system SHALL compute a content hash of each uploaded replay and SHALL prevent the same replay from being ingested more than once.

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/pending-upload-store", () => ({ createPendingUpload: vi.fn() }));
@@ -20,23 +20,47 @@ function request(body: unknown): Request {
 describe("POST /api/uploads", () => {
   beforeEach(() => {
     vi.resetAllMocks();
+    vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_test_secret");
+    vi.stubEnv("BLOB_ACCESS", undefined);
     vi.mocked(hasValidSession).mockResolvedValue(true);
   });
 
-  it("creates a binding for a replay filename", async () => {
-    const binding = {
-      uploadId: "upload-id",
-      nonce: "nonce",
-      pathname: "replays/upload-id.rofl",
-    };
-    vi.mocked(createPendingUpload).mockResolvedValue(binding);
+  afterEach(() => vi.unstubAllEnvs());
 
-    const response = await POST(request({ filename: "match.ROFL" }));
+  it.each(["public", "private"] as const)(
+    "returns the %s access mode without disclosing the store token",
+    async (access) => {
+      vi.stubEnv("BLOB_ACCESS", access);
+      const binding = {
+        uploadId: "upload-id",
+        nonce: "nonce",
+        pathname: "replays/upload-id.rofl",
+      };
+      vi.mocked(createPendingUpload).mockResolvedValue(binding);
 
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual(binding);
-    expect(createPendingUpload).toHaveBeenCalledTimes(1);
-  });
+      const response = await POST(request({ filename: "match.ROFL" }));
+
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ ...binding, access });
+      expect(createPendingUpload).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    ["BLOB_READ_WRITE_TOKEN", "invalid"],
+    ["BLOB_ACCESS", "invalid"],
+  ])(
+    "rejects invalid %s before reserving a pending upload",
+    async (key, value) => {
+      vi.stubEnv(key, value);
+      const response = await POST(request({ filename: "match.rofl" }));
+      expect(response.status).toBe(503);
+      expect(await response.json()).toEqual({
+        error: "Upload storage is unavailable.",
+      });
+      expect(createPendingUpload).not.toHaveBeenCalled();
+    },
+  );
 
   it("rejects unauthenticated uploads without creating a binding", async () => {
     vi.mocked(hasValidSession).mockResolvedValue(false);

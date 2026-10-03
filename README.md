@@ -33,8 +33,8 @@ Riot API를 사용하지 않고 `.rofl` 메타데이터를 직접 파싱합니�
 기존 기록은 활성 상태와 원래 날짜를 유지합니다. 새 앱 배포 전에 `npm run db:migrate`를 적용하세요.
 
 앱은 [llvy.vercel.app](https://llvy.vercel.app)에 배포했고 로그인 화면 응답을 확인했습니다.
-**서비스 전체 검증은 아직 끝나지 않았습니다.** Neon Production 연결과 운영 DB 마이그레이션 3개는
-완료했으며, Blob 연결·공유 비밀번호 설정과 실제 업로드 검증이 남아 있습니다. 실제 솔랭 `.rofl` 샘플은 확보했으며,
+**서비스 전체 검증은 아직 끝나지 않았습니다.** Neon·비공개 Blob Production 연결, 공유 비밀번호 설정과
+운영 DB 마이그레이션 3개는 완료했습니다. 변경 설정의 배포 반영과 실제 업로드 검증이 남아 있습니다. 실제 솔랭 `.rofl` 샘플은 확보했으며,
 30MB 브라우저 직접 업로드와 배포 환경의 전체 흐름은 아래 절차로 확인해야 합니다.
 현재 증거는 [운영 배포 확인 기록](docs/validation/2026-10-04-production-deployment.md),
 남은 항목은 OpenSpec `replay-ingestion-mvp/tasks.md`에서 관리합니다.
@@ -48,6 +48,7 @@ Riot API를 사용하지 않고 `.rofl` 메타데이터를 직접 파싱합니�
 | `UPLOAD_PASSWORD`       | ✅   | 업로드·조회·관리 접근을 막는 공유 비밀번호. 충분히 긴 값을 쓰세요.                                                                                               |
 | `POSTGRES_URL`          | ✅   | Neon의 pooled Postgres 연결 문자열(기존 Vercel Postgres 호환).                                                                                                   |
 | `BLOB_READ_WRITE_TOKEN` | ✅   | Vercel Blob 읽기/쓰기 토큰.                                                                                                                                      |
+| `BLOB_ACCESS`           | 조건 | 연결한 Blob 스토어의 접근 모드(`private` 또는 `public`). 운영 `llvy-blob`은 `private`입니다. 미설정 시 기존 배포 호환을 위해 `public`을 사용합니다.              |
 | `AUTH_SECRET`           | 권장 | 세션 쿠키 서명용 고엔트로피 시크릿. 설정 시 로그인 비밀번호와 서명 키가 분리됩니다(미설정 시 `UPLOAD_PASSWORD`에서 HKDF 파생). `openssl rand -base64 32`로 생성. |
 | `POSTGRES_*` (그 외)    | —    | Vercel이 함께 주입하는 값들(선택).                                                                                                                               |
 
@@ -128,15 +129,17 @@ DB 테스트는 [`src/test/database.ts`](src/test/database.ts)가 메모리에 P
 
 1. 클라이언트가 `POST /api/uploads`로 업로드를 시작하면 서버가 추측 불가능한
    `{ uploadId, nonce }`(nonce는 해시로만 저장)와 예약된 Blob 경로
-   `replays/<uploadId>.rofl`을 발급합니다.
+   `replays/<uploadId>.rofl`과 서버의 `BLOB_ACCESS` 값을 발급합니다. 브라우저는 이 접근
+   모드로 직접 업로드하며, 읽기/쓰기 토큰은 서버에만 남습니다.
 2. `/api/blob/upload`는 유효한 바인딩이 제시된 경우에만, **정확히 그 경로**에 대한
    업로드 토큰을 발급합니다 (랜덤 접미사 없음, 덮어쓰기 금지, 바인딩과 동일한 만료 시각).
-3. `/api/process`는 Blob URL이 현재 `BLOB_READ_WRITE_TOKEN`의 public 스토어와
+3. `/api/process`는 Blob URL이 현재 `BLOB_READ_WRITE_TOKEN`과 `BLOB_ACCESS`의 스토어와
    활성 바인딩의 경로에 정확히 일치할 때만 파일을 가져오고,
    중복/오류 정리 시에도 **그 바인딩에 묶인 Blob만** 삭제합니다. 임의의 same-store
    URL(예: 기존 게임의 원본 리플레이)을 넘겨도 fetch/삭제 전에 거부됩니다.
    다른 Blob 스토어의 동일 경로도 거부하며, query/fragment는 제거한 URL로
-   다운로드·저장·삭제합니다. 다운로드 리다이렉트는 허용하지 않습니다.
+   다운로드·저장·삭제합니다. private 파일은 이 검증을 통과한 URL에만 서버 토큰으로
+   인증해서 읽습니다. 다운로드 리다이렉트는 허용하지 않으며, 응답은 캐시하지 않습니다.
 4. 저장 성공 후 바인딩 상태 기록이 실패해도 원본 Blob을 보존합니다. 상태 기록은
    한 번 재시도하고, 계속 실패하면 로그를 남기며 바인딩은 `processing` 상태로 소비됩니다.
    DB 커밋 결과가 불확실한 오류에서도 파일을 보존합니다. 해당 파일은 게임 저장 여부를
@@ -182,7 +185,10 @@ DB 테스트는 [`src/test/database.ts`](src/test/database.ts)가 메모리에 P
 `@vercel/postgres` 클라이언트에는 Neon 연결을 사용합니다.
 
 1. 저장소를 연결해 Vercel 프로젝트를 만들고 빌드 명령을 `npm run build`로 설정합니다.
-2. Marketplace에서 **Neon**을 연결하고, **Blob** public 스토어를 연결합니다.
+2. Marketplace에서 **Neon**을 연결하고, **Blob** 스토어를 연결합니다.
+   리플레이 원본을 공개하지 않으려면 private 스토어와 `BLOB_ACCESS=private`를
+   사용합니다. 기존 public 스토어는 `BLOB_ACCESS=public`으로 지원합니다.
+   이 설정은 스토어 자체의 접근 모드와 일치해야 하며, 스토어의 공개 범위를 변경하지 않습니다.
    Neon pooled 연결 문자열을 `POSTGRES_URL`, direct 연결 문자열을
    `POSTGRES_URL_NON_POOLING`으로 설정합니다. `BLOB_READ_WRITE_TOKEN`,
    `UPLOAD_PASSWORD`, `AUTH_SECRET`도 설정하며 Preview/Production 대상을 구분합니다.
