@@ -1,0 +1,4 @@
+ALTER TABLE "games" ADD COLUMN "played_at_override" timestamp with time zone;--> statement-breakpoint
+ALTER TABLE "games" ADD COLUMN "excluded_at" timestamp with time zone;--> statement-breakpoint
+CREATE INDEX "games_active_effective_date_idx" ON "games" USING btree (coalesce("played_at_override", "played_at") desc,"uploaded_at" DESC NULLS LAST,"id" DESC NULLS LAST) WHERE "games"."excluded_at" is null;--> statement-breakpoint
+CREATE INDEX "games_excluded_effective_date_idx" ON "games" USING btree (coalesce("played_at_override", "played_at") desc,"uploaded_at" DESC NULLS LAST,"id" DESC NULLS LAST) WHERE "games"."excluded_at" is not null;

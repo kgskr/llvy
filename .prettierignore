@@ -1,0 +1,7 @@
+.next
+node_modules
+coverage
+drizzle
+.claude
+.codex
+openspec
