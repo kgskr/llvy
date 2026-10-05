@@ -216,7 +216,7 @@ async function findOrCreateAccount(
       .limit(1);
     if (known.length === 0) {
       const namesakes = await tx
-        .select({ puuid: riotAccounts.puuid })
+        .select({ puuid: riotAccounts.puuid, memberId: riotAccounts.memberId })
         .from(riotAccounts)
         .where(sameName)
         .limit(2);
@@ -227,12 +227,22 @@ async function findOrCreateAccount(
       try {
         // A reused Riot ID with multiple known identities is ambiguous. Only
         // promote a lone legacy account, never merge those histories by name.
-        if (namesakes.length === 1 && namesakes[0].puuid === null) {
+        if (
+          namesakes.length === 1 &&
+          namesakes[0].puuid === null &&
+          namesakes[0].memberId === null
+        ) {
           const promoted = await tx.transaction(async (savepoint) =>
             savepoint
               .update(riotAccounts)
               .set({ puuid: p.puuid })
-              .where(and(sameName, isNull(riotAccounts.puuid)))
+              .where(
+                and(
+                  sameName,
+                  isNull(riotAccounts.puuid),
+                  isNull(riotAccounts.memberId),
+                ),
+              )
               .returning({ id: riotAccounts.id }),
           );
           if (promoted.length > 0) return promoted[0].id;

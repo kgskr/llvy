@@ -528,7 +528,7 @@ describe("member identities and retroactive account links", () => {
   });
 
   it.each(["legacy-first", "puuid-first"] as const)(
-    "unifies an unambiguous legacy Riot ID and PUUID while preserving member links (%s)",
+    "keeps linked legacy identity safe until an explicit PUUID link (%s)",
     async (order) => {
       const legacyPlayers = tenReplayPlayers();
       legacyPlayers[0] = replayPlayer({ PUUID: null });
@@ -544,14 +544,30 @@ describe("member identities and retroactive account links", () => {
       const second = await ingest(order === "legacy-first" ? stable : legacy);
       expect(await rowCounts()).toEqual({
         games: 2,
-        accounts: 10,
+        accounts: order === "legacy-first" ? 11 : 10,
         participants: 20,
       });
       const [resolved] = await db
         .select()
         .from(riotAccounts)
         .where(eq(riotAccounts.puuid, "puuid-1"));
-      expect(resolved).toMatchObject({ id: account.id, memberId });
+      if (order === "legacy-first") {
+        expect(resolved).toMatchObject({ memberId: null });
+        expect(resolved.id).not.toBe(account.id);
+        const [legacyAccount] = await db
+          .select()
+          .from(riotAccounts)
+          .where(eq(riotAccounts.id, account.id));
+        expect(legacyAccount).toMatchObject({ puuid: null, memberId });
+        expect(
+          (await getGameDetail(second.gameId))?.participants.find(
+            (p) => p.gameName === "Player1",
+          ),
+        ).toMatchObject({ memberId: null });
+        await linkAccount(resolved.id, memberId);
+      } else {
+        expect(resolved).toMatchObject({ id: account.id, memberId });
+      }
       for (const gameId of [first.gameId, second.gameId]) {
         expect(
           (await getGameDetail(gameId))?.participants.find(

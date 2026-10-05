@@ -2,7 +2,7 @@
 
 ### Requirement: Maintain member records
 
-The system SHALL store a record for each club member containing a stable unique identifier (UUID), a name, and a birth year. The UUID MUST be the member's primary identity and MUST remain stable across changes to the member's name or accounts.
+The system SHALL store a record for each club member containing a stable unique identifier (UUID), a name, and an optional birth year (NULL when omitted). The UUID MUST be the member's primary identity and MUST remain stable across changes to the member's name or accounts.
 
 #### Scenario: Create a member
 - **WHEN** an administrator creates a member with a name and birth year
@@ -24,9 +24,13 @@ The system SHALL allow a single member to have multiple Riot accounts, since mem
 - **WHEN** the same Riot ID without a PUUID is encountered more than once and identifies one unambiguous account
 - **THEN** the system uses that account record rather than creating duplicates
 
-#### Scenario: A legacy account gains a PUUID
-- **WHEN** a previously unseen PUUID is supplied with a Riot ID matching exactly one legacy account and no conflicting known identities
-- **THEN** the system adds the PUUID to that account while preserving its UUID and member link
+#### Scenario: An unlinked legacy account gains a PUUID
+- **WHEN** a previously unseen PUUID is supplied with a Riot ID matching exactly one legacy account that has no member link and no conflicting known identities
+- **THEN** the system adds the PUUID to that account while preserving its UUID
+
+#### Scenario: A linked legacy account is not promoted by display name
+- **WHEN** a previously unseen PUUID has the same Riot ID as an already member-linked legacy account
+- **THEN** the system retains the legacy account and its member link, creates a separate unlinked PUUID account, and requires explicit account linking before the new games contribute to that member's history
 
 #### Scenario: Reused display names do not merge distinct identities
 - **WHEN** multiple known PUUIDs share a Riot ID and a replay supplies no stable identity
@@ -34,18 +38,18 @@ The system SHALL allow a single member to have multiple Riot accounts, since mem
 
 ### Requirement: Auto-link known Riot IDs during ingestion
 
-When ingesting a replay, the system SHALL automatically associate each parsed participant with the existing Riot account that matches its Riot ID, so participants of registered accounts resolve to the correct member without manual action.
+When ingesting a replay, the system SHALL resolve each participant by PUUID when present, otherwise by an unambiguous Riot ID candidate. Games SHALL resolve through the selected account's current member link. Display-name equality alone MUST NOT promote a member-linked legacy account to an unseen PUUID.
 
 #### Scenario: Known Riot ID resolves to its member
-- **WHEN** a parsed participant's Riot ID matches a Riot account already linked to a member
+- **WHEN** a parsed participant resolves to an existing member-linked account by the supported identity rules
 - **THEN** the participant is associated with that account and resolves to its member
 
 ### Requirement: Hold unknown Riot IDs as unlinked
 
-When a parsed Riot ID is not yet registered, the system SHALL create a Riot account record in an unlinked state (associated with no member) and MUST NOT discard the participant data.
+When a participant cannot resolve to an existing account under the supported identity rules, the system SHALL create a Riot account record in an unlinked state (associated with no member) and MUST NOT discard the participant data.
 
 #### Scenario: New Riot ID is stored unlinked
-- **WHEN** a parsed participant's Riot ID does not match any existing Riot account
+- **WHEN** a parsed participant cannot resolve to an existing account under the supported identity rules
 - **THEN** the system creates an unlinked Riot account for that Riot ID and associates the participant with it, with no member assigned
 
 ### Requirement: Manually link Riot accounts to members
