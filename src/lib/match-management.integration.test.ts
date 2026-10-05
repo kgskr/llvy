@@ -324,6 +324,68 @@ describe("match management persistence", () => {
 });
 
 describe("combined member history", () => {
+  it("summarizes champions across pages and accounts without excluded or ambiguous games", async () => {
+    await storeGame([
+      player("main", { CHAMPIONS_KILLED: "6" }),
+      player("opponent", { TEAM: "200", WIN: "Fail" }),
+    ]);
+    await storeGame([
+      player("alt", { WIN: "Fail", CHAMPIONS_KILLED: "2", NUM_DEATHS: "4" }),
+      player("opponent", { TEAM: "200" }),
+    ]);
+    await storeGame([
+      player("main", {
+        SKIN: "Lux",
+        WIN: "Fail",
+        CHAMPIONS_KILLED: null,
+        NUM_DEATHS: null,
+        ASSISTS: null,
+      }),
+    ]);
+    const excluded = await storeGame([player("main", { SKIN: "Garen" })]);
+    await setGameExcluded(excluded.gameId, true);
+    await storeGame([player("main"), player("alt", { SKIN: "Lux" })]);
+    const unknownChampion = await storeGame([player("main")]);
+    await db
+      .update(gameParticipants)
+      .set({ champion: null })
+      .where(eq(gameParticipants.gameId, unknownChampion.gameId));
+    const memberId = await createMember("Champion summary", 1997);
+    await linkPuuid("main", memberId);
+    await linkPuuid("alt", memberId);
+
+    const history = await getMemberHistory(memberId, 1, 1);
+    expect(history?.games).toHaveLength(1);
+    expect(history?.championStats).toEqual([
+      {
+        champion: "Ahri",
+        totalGames: 2,
+        wins: 1,
+        losses: 1,
+        undecided: 0,
+        winRate: 50,
+        averageKills: 4,
+        averageDeaths: 3,
+        averageAssists: 7,
+      },
+      {
+        champion: "Lux",
+        ...emptyStats,
+        totalGames: 1,
+        undecided: 1,
+      },
+    ]);
+    expect((await getMemberHistory(memberId, 1, 100))?.championStats).toEqual(
+      history?.championStats,
+    );
+    await setGameExcluded(excluded.gameId, false);
+    expect(
+      (await getMemberHistory(memberId))?.championStats.map(
+        (row) => row.champion,
+      ),
+    ).toEqual(["Ahri", "Garen", "Lux"]);
+  });
+
   it("combines accounts with independent non-null averages and page-independent aggregates", async () => {
     const first = await storeGame(
       [
@@ -585,6 +647,7 @@ describe("combined member history", () => {
       accounts: [],
       stats: emptyStats,
       games: [],
+      championStats: [],
     });
     const [account] = await db
       .insert(riotAccounts)

@@ -37,6 +37,7 @@ export type MemberHistory = {
   member: { id: string; name: string; birthYear: number | null };
   accounts: { id: string; gameName: string; tagLine: string }[];
   stats: MemberHistoryStats;
+  championStats: (MemberHistoryStats & { champion: string })[];
   games: MemberHistoryGame[];
 };
 
@@ -105,7 +106,7 @@ export async function getMemberHistory(
       .groupBy(games.id),
   );
 
-  const [accounts, [stats], history] = await Promise.all([
+  const [accounts, [stats], history, championStats] = await Promise.all([
     db
       .select({
         id: riotAccounts.id,
@@ -162,7 +163,27 @@ export async function getMemberHistory(
         Number.isSafeInteger(limit) && limit >= 0 ? Math.min(limit, 100) : 25,
       )
       .offset(Number.isSafeInteger(offset) && offset >= 0 ? offset : 0),
+    db
+      .with(memberGames)
+      .select({
+        champion: sql<string>`${memberGames.champion}`,
+        totalGames: sql<number>`count(*)::int`,
+        wins: sql<number>`(count(*) filter (where ${memberGames.result} = 'win'))::int`,
+        losses: sql<number>`(count(*) filter (where ${memberGames.result} = 'loss'))::int`,
+        undecided: sql<number>`(count(*) filter (where ${memberGames.result} = 'unknown'))::int`,
+        winRate: sql<number | null>`(
+          100.0 * count(*) filter (where ${memberGames.result} = 'win')
+          / nullif(count(*) filter (where ${memberGames.result} in ('win', 'loss')), 0)
+        )::float8`,
+        averageKills: sql<number | null>`avg(${memberGames.kills})::float8`,
+        averageDeaths: sql<number | null>`avg(${memberGames.deaths})::float8`,
+        averageAssists: sql<number | null>`avg(${memberGames.assists})::float8`,
+      })
+      .from(memberGames)
+      .where(sql`${memberGames.champion} is not null`)
+      .groupBy(memberGames.champion)
+      .orderBy(desc(sql`count(*)`), asc(memberGames.champion)),
   ]);
 
-  return { member, accounts, stats, games: history };
+  return { member, accounts, stats, games: history, championStats };
 }

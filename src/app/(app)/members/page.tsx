@@ -12,7 +12,7 @@ export default async function MembersPage() {
     <section className="stack">
       <div className="page-heading">
         <div>
-          <h1>모임원 전적</h1>
+          <h1>모임원 정보</h1>
           <p className="muted">
             연결된 라이엇 계정의 전적을 한곳에서 확인하세요.
           </p>
@@ -31,7 +31,10 @@ export default async function MembersPage() {
           {members.map((member) => (
             <article key={member.id} className="card stack">
               <h2>
-                <Link href={`/members/${member.id}`}>{member.name}</Link>
+                <Link href={`/members/${member.id}`}>
+                  {member.name}
+                  {member.birthYear === null ? "" : `(${member.birthYear})`}
+                </Link>
               </h2>
               {member.accounts.length > 0 ? (
                 <ul className="account-list">
@@ -44,7 +47,6 @@ export default async function MembersPage() {
               ) : (
                 <p className="muted">연결된 계정이 없습니다.</p>
               )}
-              <Link href={`/members/${member.id}`}>전적 보기 →</Link>
             </article>
           ))}
         </div>

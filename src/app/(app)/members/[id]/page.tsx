@@ -49,10 +49,11 @@ export default async function MemberHistoryPage({
   );
   if (page > pageCount) redirect(`/members/${id}?page=${pageCount}`);
 
-  const { member, accounts, stats, games } = history;
-  const champions = games.flatMap((game) =>
-    game.champion ? [game.champion] : [],
-  );
+  const { member, accounts, stats, games, championStats } = history;
+  const champions = [
+    ...championStats.map((summary) => summary.champion),
+    ...games.flatMap((game) => (game.champion ? [game.champion] : [])),
+  ];
   const championNames =
     champions.length > 0
       ? await resolveChampionNames(champions)
@@ -99,6 +100,54 @@ export default async function MemberHistoryPage({
         승률은 승패가 결정된 경기 기준입니다. 평균은 값이 있는 경기만 계산하며,
         한 경기에 여러 계정이 연결된 경우 승패·평균 집계에서 제외합니다.
       </p>
+
+      <section className="card stack">
+        <h2>플레이한 챔피언</h2>
+        {championStats.length === 0 ? (
+          <p className="muted">집계할 챔피언 전적이 없습니다.</p>
+        ) : (
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">챔피언</th>
+                  <th scope="col">경기 수</th>
+                  <th scope="col">승 / 패 / 미정</th>
+                  <th scope="col">승률</th>
+                  <th scope="col">평균 K / D / A</th>
+                </tr>
+              </thead>
+              <tbody>
+                {championStats.map((summary) => (
+                  <tr key={summary.champion}>
+                    <th scope="row">
+                      {championNames.get(summary.champion) ?? summary.champion}
+                    </th>
+                    <td>{summary.totalGames.toLocaleString()}경기</td>
+                    <td>
+                      {summary.wins} / {summary.losses} / {summary.undecided}
+                    </td>
+                    <td>
+                      {summary.winRate === null
+                        ? "—"
+                        : `${summary.winRate.toFixed(1)}%`}
+                    </td>
+                    <td>
+                      {average(summary.averageKills)} /{" "}
+                      {average(summary.averageDeaths)} /{" "}
+                      {average(summary.averageAssists)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="form-note">
+          연결된 모든 계정의 전체 전적을 챔피언별로 집계합니다. 챔피언을 확인할
+          수 없는 경기와 계정 중복 연결 경기는 제외합니다.
+        </p>
+      </section>
 
       <section className="card stack">
         <h2>연결된 라이엇 계정</h2>
