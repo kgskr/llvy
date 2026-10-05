@@ -292,9 +292,7 @@ describe("read model authorization and page privacy", () => {
       expect(game.includes('data-management="comment"')).toBe(privileged);
       expect(game.includes('data-management="exclude"')).toBe(privileged);
       expect(layout).toMatch(
-        privileged
-          ? /<a(?=[^>]*class="nav-brand")(?=[^>]*href="\/games")[^>]*>/
-          : /<a(?=[^>]*class="nav-brand")(?=[^>]*href="\/")[^>]*>/,
+        /<a(?=[^>]*class="nav-brand")(?=[^>]*href="\/")[^>]*>/,
       );
       expect(layout).toContain('href="/members"');
       expect(layout).not.toContain("업로더");
@@ -384,27 +382,22 @@ describe("read model authorization and page privacy", () => {
     },
   );
 
-  it("shows the reader landing without querying member or game records", async () => {
-    await signIn("viewer");
-    const html = renderToStaticMarkup(await HomePage());
-    expect(html).toContain('type="search"');
-    expect(html).toContain('action="/search"');
-    expect(html).toContain('method="get"');
-    expect(html).toContain('role="combobox"');
-    expect(html).not.toContain("검색 기능은 준비 중입니다.");
-    expect(mocks.listMembers).not.toHaveBeenCalled();
-    expect(mocks.gameDetail).not.toHaveBeenCalled();
-  });
-
-  it.each(["admin", "owner"] as const)(
-    "keeps %s home navigation on games",
+  it.each(["viewer", "admin", "owner"] as const)(
+    "shows the search landing for %s without querying member or game records",
     async (role) => {
       await signIn(role);
-      await expect(HomePage()).rejects.toThrow("redirect:/games");
+      const html = renderToStaticMarkup(await HomePage());
+      expect(html).toContain('type="search"');
+      expect(html).toContain('action="/search"');
+      expect(html).toContain('method="get"');
+      expect(html).toContain('role="combobox"');
+      expect(html).not.toContain("검색 기능은 준비 중입니다.");
+      expect(mocks.listMembers).not.toHaveBeenCalled();
+      expect(mocks.gameDetail).not.toHaveBeenCalled();
     },
   );
 
-  it("requires a session for the reader landing", async () => {
+  it("requires a session for the search landing", async () => {
     await expect(HomePage()).rejects.toThrow("redirect:/login");
   });
 });

@@ -20,7 +20,7 @@ export default async function AppLayout({
   return (
     <div className="app-shell">
       <header className="nav">
-        <Link href={isAdmin ? "/games" : "/"} className="nav-brand">
+        <Link href="/" className="nav-brand">
           LLVY
         </Link>
         <nav className="nav-links">

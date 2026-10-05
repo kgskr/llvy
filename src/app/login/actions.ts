@@ -48,10 +48,7 @@ export async function login(
       (isAdminPath(pathname) || pathname === "/upload")
     ) {
       destination = "/";
-    } else if (
-      (attempt.role !== "owner" && isOwnerPath(pathname)) ||
-      (attempt.role !== "viewer" && pathname === "/")
-    ) {
+    } else if (attempt.role !== "owner" && isOwnerPath(pathname)) {
       destination = "/games";
     }
   } catch (error) {

@@ -5,7 +5,6 @@ import { NicknameSearchForm } from "./nickname-search-form";
 export default async function HomePage() {
   const session = await getSession();
   if (!session) redirect("/login");
-  if (session.role !== "viewer") redirect("/games");
 
   return (
     <section className="search-landing" aria-labelledby="search-landing-title">

@@ -400,8 +400,8 @@ describe("login and route authorization", () => {
     [VIEWER_KEY, "admin", "/games?page=2", "viewer", "/games?page=2"],
     [VIEWER_KEY, "admin", "//evil.test", "viewer", "/"],
     [VIEWER_KEY, "owner", "/", "viewer", "/"],
-    [ADMIN_KEY, "viewer", "/", "admin", "/games"],
-    [OWNER_KEY, "viewer", "/", "owner", "/games"],
+    [ADMIN_KEY, "viewer", "/", "admin", "/"],
+    [OWNER_KEY, "viewer", "/", "owner", "/"],
     [ADMIN_KEY, "viewer", "/admin", "admin", "/admin"],
     [ADMIN_KEY, "owner", "/admin/audit", "admin", "/games"],
     [OWNER_KEY, "viewer", "/admin/audit", "owner", "/admin/audit"],
@@ -425,10 +425,10 @@ describe("login and route authorization", () => {
 
   it.each([
     [VIEWER_KEY, "/"],
-    [ADMIN_KEY, "/games"],
-    [OWNER_KEY, "/games"],
+    [ADMIN_KEY, "/"],
+    [OWNER_KEY, "/"],
   ])(
-    "chooses the role's landing when no destination is supplied",
+    "chooses the search landing when no destination is supplied",
     async (key, destination) => {
       await expect(login(null, form({ password: key }))).rejects.toThrow(
         `redirect:${destination}`,
