@@ -101,9 +101,9 @@ const PARTICIPANT = {
 };
 const GAME = {
   id: GAME_ID,
-  playedAt: new Date("2026-10-02T12:00:00Z"),
+  playedAt: "2026-10-02",
   playedAtSource: "file_mtime",
-  originalPlayedAt: new Date("2026-10-02T12:00:00Z"),
+  originalPlayedAt: "2026-10-02",
   originalPlayedAtSource: "file_mtime",
   playedAtOverride: null,
   comment: null,
@@ -289,6 +289,7 @@ describe("read model authorization and page privacy", () => {
         expect(html.includes('href="/upload"')).toBe(privileged);
       }
       expect(game.includes('data-management="date"')).toBe(privileged);
+      expect(game.includes('data-management="comment"')).toBe(privileged);
       expect(game.includes('data-management="exclude"')).toBe(privileged);
       expect(layout).toMatch(
         privileged
@@ -300,6 +301,41 @@ describe("read model authorization and page privacy", () => {
       expect(layout).not.toContain('href="/admin/audit"');
     },
   );
+
+  it("shows member history calendar dates without time while retaining duration", async () => {
+    await signIn("viewer");
+    mocks.history.mockResolvedValue({
+      ...HISTORY,
+      stats: { ...HISTORY.stats, totalGames: 1, wins: 1, winRate: 100 },
+      games: [
+        {
+          id: GAME_ID,
+          playedAt: "2026-10-02",
+          playedAtSource: "file_mtime",
+          durationMs: 1200000,
+          champion: "Ahri",
+          position: "MIDDLE",
+          kills: 2,
+          deaths: 3,
+          assists: 4,
+          result: "win",
+          ambiguous: false,
+        },
+      ],
+    });
+    const html = renderToStaticMarkup(
+      await MemberHistoryPage({
+        params: Promise.resolve({ id: MEMBER_ID }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+    expect(html).toContain("김*수의 전적");
+    expect(html).toContain("2026. 10. 2.");
+    expect(html).toContain("20분 00초");
+    expect(html).not.toContain("오후");
+    expect(html).not.toContain("오전");
+    expect(html).not.toContain("한국 시간 기준");
+  });
 
   it("protects the upload page without depending on the layout or proxy", async () => {
     await expect(UploadPage()).rejects.toThrow("redirect:/login");
@@ -313,6 +349,40 @@ describe("read model authorization and page privacy", () => {
     mocks.findActiveAdmin.mockResolvedValue(null);
     await expect(UploadPage()).rejects.toThrow("redirect:/login");
   });
+
+  it.each(["viewer", "admin", "owner"] as const)(
+    "shows calendar dates and escaped whitespace-preserving shared comments to %s",
+    async (role) => {
+      await signIn(role);
+      const comment = "  <script>x</script>\n 메모  ";
+      mocks.gameDetail.mockResolvedValue({ ...GAME, comment });
+      mocks.listGames.mockResolvedValue([
+        { ...GAME, comment, participantCount: 1 },
+      ]);
+      mocks.countGames.mockResolvedValue(1);
+      const detail = renderToStaticMarkup(
+        await GameDetailPage({
+          params: Promise.resolve({ id: GAME_ID }),
+          searchParams: Promise.resolve({}),
+        }),
+      );
+      const list = renderToStaticMarkup(
+        await GamesPage({ searchParams: Promise.resolve({}) }),
+      );
+      for (const html of [detail, list]) {
+        expect(html).toContain("2026. 10. 2.");
+        expect(html).toContain("20분 00초");
+        expect(html).toContain("  &lt;script&gt;x&lt;/script&gt;\n 메모  ");
+        expect(html).toContain("white-space:pre-wrap");
+        expect(html).not.toContain("<script>x</script>");
+        expect(html).not.toContain("오후");
+        expect(html).not.toContain("오전");
+      }
+      expect(detail.includes('data-management="comment"')).toBe(
+        role !== "viewer",
+      );
+    },
+  );
 
   it.each(["admin", "owner"] as const)(
     "keeps %s home navigation on games",

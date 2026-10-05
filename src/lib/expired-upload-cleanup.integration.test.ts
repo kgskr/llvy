@@ -127,7 +127,7 @@ describe("expired upload reconciliation", () => {
       .values({
         fileHash: "committed-hash",
         blobUrl: url,
-        playedAt: new Date("2026-10-05T12:00:00Z"),
+        playedAt: "2026-10-05",
         playedAtSource: "upload",
       })
       .returning({ id: games.id });
@@ -324,7 +324,7 @@ describe("expired upload reconciliation", () => {
       .values({
         fileHash: "committed-with-terminal-hash",
         blobUrl: url,
-        playedAt: new Date("2026-10-05T12:00:00Z"),
+        playedAt: "2026-10-05",
         playedAtSource: "upload",
       })
       .returning({ id: games.id });

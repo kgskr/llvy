@@ -14,7 +14,7 @@ import { listMembersWithAccounts } from "@/lib/members";
 import { getSession } from "@/lib/session";
 import { parsePageNumber } from "@/lib/validation";
 
-/** Check live credentials before every role-specific read. */
+/** Check live credentials before every role-specific cache read. */
 async function readRole() {
   const session = await getSession();
   if (!session) redirect("/login");
@@ -56,6 +56,7 @@ export async function getGameDetailReadModel(id: string) {
           originalPlayedAt: game.originalPlayedAt,
           originalPlayedAtSource: game.originalPlayedAtSource,
           playedAtOverride: game.playedAtOverride,
+          comment: game.comment,
           excludedAt: game.excludedAt?.toISOString() ?? null,
           durationMs: game.durationMs,
           gameVersion: game.gameVersion,

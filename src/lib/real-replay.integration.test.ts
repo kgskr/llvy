@@ -18,6 +18,7 @@ import {
 
 import { gameParticipants, games, riotAccounts } from "@/db/schema";
 
+import { formatKoreaDateInput } from "./game-date";
 import type { GameParticipantRow } from "./games";
 import type { IngestResult } from "./ingest";
 import type { CreatedPendingUpload } from "./pending-upload-store";
@@ -167,7 +168,7 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
     expect(detail?.gameVersion).toBe(parsed.gameVersion);
     expect(detail?.winningTeam).toBe(parsed.winningTeam);
     expect(detail?.playedAtSource).toBe("file_mtime");
-    expect(detail?.playedAt.getTime()).toBe(lastModified);
+    expect(detail?.playedAt).toBe(formatKoreaDateInput(new Date(lastModified)));
     expect(detail?.originalFilename === originalFilename).toBe(true);
     expect(detail?.participants.length).toBe(parsed.participants.length);
 
@@ -205,7 +206,7 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
     const list = await gameQueries.listGames();
     expect(list).toHaveLength(1);
     expect(list[0].participantCount).toBe(parsed.participants.length);
-    expect(list[0].playedAt.getTime()).toBe(lastModified);
+    expect(list[0].playedAt).toBe(formatKoreaDateInput(new Date(lastModified)));
     expect(await uploadStore.getPendingUpload(pending.uploadId)).toMatchObject({
       state: "processed",
       blobUrl: pending.blobUrl,
@@ -231,7 +232,7 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
     ).toHaveLength(parsed.participants.length);
     const [stored] = await database.db.select().from(games);
     expect(stored.blobUrl).toBe(first.blobUrl);
-    expect(stored.playedAt.getTime()).toBe(lastModified);
+    expect(stored.playedAt).toBe(formatKoreaDateInput(new Date(lastModified)));
     expect(del).toHaveBeenCalledExactlyOnceWith(second.blobUrl, {
       token: "vercel_blob_rw_replay-test_secret",
       abortSignal: expect.any(AbortSignal),
@@ -258,8 +259,10 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
     const result = await process(pending, null);
     const detail = await gameQueries.getGameDetail(result.gameId);
     expect(detail?.playedAtSource).toBe("upload");
-    expect(detail?.playedAt.getTime()).toBeGreaterThanOrEqual(before);
-    expect(detail?.playedAt.getTime()).toBeLessThanOrEqual(Date.now());
+    expect(detail!.playedAt >= formatKoreaDateInput(new Date(before))).toBe(
+      true,
+    );
+    expect(detail!.playedAt <= formatKoreaDateInput(new Date())).toBe(true);
     const accounts = await memberQueries.listUnlinkedAccounts();
     expect(accounts.length).toBe(parsed.participants.length);
     const account = accounts[0];

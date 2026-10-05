@@ -37,6 +37,12 @@ export function formatDate(value: Date): string {
   return dateFormatter.format(value);
 }
 
+/** Calendar dates have no timezone or time to format. */
+export function formatGameDate(value: string): string {
+  const [year, month, day] = value.split("-");
+  return `${year}. ${Number(month)}. ${Number(day)}.`;
+}
+
 export function riotId(gameName: string, tagLine: string): string {
   return tagLine ? `${gameName}#${tagLine}` : gameName;
 }

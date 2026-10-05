@@ -9,11 +9,13 @@ import {
 } from "react";
 
 import { MIN_GAME_DATE_INPUT } from "@/lib/game-date";
+import { MAX_GAME_COMMENT_LENGTH } from "@/lib/game-comment";
 
 import {
   restoreGameDateAction,
   setGameExcludedAction,
   updateGameDateAction,
+  updateGameCommentAction,
   type GameActionState,
 } from "./actions";
 
@@ -128,22 +130,21 @@ export function GameDateForm({
       <form action={formAction} className="stack">
         <input type="hidden" name="gameId" value={gameId} />
         <div className="field">
-          <label htmlFor={fieldId}>경기 날짜·시간 (한국 시간, UTC+09:00)</label>
+          <label htmlFor={fieldId}>경기 날짜</label>
           <input
             id={fieldId}
             name="playedAt"
-            type="datetime-local"
+            type="date"
             value={value}
             onChange={(event) => setValue(event.target.value)}
             min={MIN_GAME_DATE_INPUT}
-            step="60"
             required
             disabled={busy}
             aria-describedby={`${fieldId}-note`}
           />
           <p id={`${fieldId}-note`} className="form-note">
-            2009년 이후부터 현재 기준 24시간 이내의 날짜를 입력하세요. 원본
-            시각은 보존됩니다.
+            2009년 1월 1일부터 한국 날짜 기준 내일까지 입력할 수 있습니다. 원본
+            날짜는 보존됩니다.
           </p>
         </div>
         <div>
@@ -167,6 +168,94 @@ export function GameDateForm({
           </button>
           {restoreState?.status === "error" || !notify ? (
             <Feedback state={restoreState} />
+          ) : null}
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
+export function GameCommentForm({
+  gameId,
+  currentValue,
+}: {
+  gameId: string;
+  currentValue: string | null;
+}) {
+  const fieldId = useId();
+  const notify = useContext(NoticeContext);
+  const [value, setValue] = useState(currentValue ?? "");
+  const [state, formAction, pending] = useActionState<
+    GameActionState,
+    FormData
+  >(async (previousState, formData) => {
+    notify?.(null);
+    const next = await updateGameCommentAction(previousState, formData);
+    if (next?.status === "success") notify?.(next);
+    return next;
+  }, null);
+  const [clearState, clearAction, clearing] = useActionState<
+    GameActionState,
+    FormData
+  >(async (previousState, formData) => {
+    notify?.(null);
+    const next = await updateGameCommentAction(previousState, formData);
+    if (next?.status === "success") {
+      setValue("");
+      notify?.(next);
+    }
+    return next;
+  }, null);
+  const busy = pending || clearing;
+  const length = [...value].length;
+  const tooLong = length > MAX_GAME_COMMENT_LENGTH;
+
+  return (
+    <div className="stack">
+      <form action={formAction} className="stack">
+        <input type="hidden" name="gameId" value={gameId} />
+        <div className="field">
+          <label htmlFor={fieldId}>게임 코멘트</label>
+          <textarea
+            id={fieldId}
+            name="comment"
+            rows={2}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            disabled={busy}
+            aria-invalid={tooLong || undefined}
+            aria-describedby={`${fieldId}-note`}
+          />
+          <p
+            id={`${fieldId}-note`}
+            className={tooLong ? "form-error" : "form-note"}
+          >
+            공백 포함 {length} / {MAX_GAME_COMMENT_LENGTH}자 · 비워서 저장하면
+            코멘트가 지워집니다.
+          </p>
+        </div>
+        <div>
+          <button type="submit" className="button" disabled={busy || tooLong}>
+            {pending ? "저장 중…" : "코멘트 저장"}
+          </button>
+        </div>
+        {state?.status === "error" || !notify ? (
+          <Feedback state={state} />
+        ) : null}
+      </form>
+      {currentValue !== null ? (
+        <form action={clearAction}>
+          <input type="hidden" name="gameId" value={gameId} />
+          <input type="hidden" name="comment" value="" />
+          <button
+            type="submit"
+            className="button button-secondary"
+            disabled={busy}
+          >
+            {clearing ? "지우는 중…" : "코멘트 지우기"}
+          </button>
+          {clearState?.status === "error" || !notify ? (
+            <Feedback state={clearState} />
           ) : null}
         </form>
       ) : null}

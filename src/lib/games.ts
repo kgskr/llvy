@@ -5,16 +5,18 @@ import { desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { gameParticipants, games, members, riotAccounts } from "@/db/schema";
 import { isUuid } from "@/lib/validation";
+import { validateGameDateInput } from "@/lib/game-date";
 
 export type GameVisibility = "active" | "excluded";
 
 export type GameListItem = {
   id: string;
-  playedAt: Date;
+  playedAt: string;
   playedAtSource: string;
   durationMs: number | null;
   winningTeam: number | null;
   participantCount: number;
+  comment: string | null;
 };
 
 export type GameParticipantRow = {
@@ -35,11 +37,12 @@ export type GameParticipantRow = {
 
 export type GameDetail = {
   id: string;
-  playedAt: Date;
+  playedAt: string;
   playedAtSource: string;
-  originalPlayedAt: Date;
+  originalPlayedAt: string;
   originalPlayedAtSource: string;
-  playedAtOverride: Date | null;
+  playedAtOverride: string | null;
+  comment: string | null;
   excludedAt: Date | null;
   durationMs: number | null;
   gameVersion: string | null;
@@ -49,7 +52,7 @@ export type GameDetail = {
 };
 
 const effectivePlayedAt =
-  sql<Date>`coalesce(${games.playedAtOverride}, ${games.playedAt})`.mapWith(
+  sql<string>`coalesce(${games.playedAtOverride}, ${games.playedAt})`.mapWith(
     games.playedAt,
   );
 const effectivePlayedAtSource = sql<string>`case
@@ -76,6 +79,7 @@ export async function listGames(
       durationMs: games.durationMs,
       winningTeam: games.winningTeam,
       participantCount: sql<number>`count(${gameParticipants.id})::int`,
+      comment: games.comment,
     })
     .from(games)
     .leftJoin(gameParticipants, eq(gameParticipants.gameId, games.id))
@@ -140,6 +144,7 @@ export async function getGameDetail(id: string): Promise<GameDetail | null> {
     originalPlayedAt: game.playedAt,
     originalPlayedAtSource: game.playedAtSource,
     playedAtOverride: game.playedAtOverride,
+    comment: game.comment,
     excludedAt: game.excludedAt,
     durationMs: game.durationMs,
     gameVersion: game.gameVersion,
@@ -165,16 +170,13 @@ export async function setGameExcluded(
   return rows.length > 0;
 }
 
-/** Correct only the override; null restores the preserved source timestamp. */
+/** Correct only the override; null restores the preserved source date. */
 export async function setGamePlayedAt(
   id: string,
-  playedAt: Date | null,
+  playedAt: string | null,
 ): Promise<boolean> {
   if (!isUuid(id)) return false;
-  if (
-    playedAt !== null &&
-    (!(playedAt instanceof Date) || !Number.isFinite(playedAt.getTime()))
-  ) {
+  if (playedAt !== null && !validateGameDateInput(playedAt).ok) {
     return false;
   }
   const rows = await db

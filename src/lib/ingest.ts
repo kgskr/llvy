@@ -10,6 +10,7 @@ import type { Actor } from "@/lib/auth";
 import { appendAudit, lockActor, type DbTransaction } from "@/lib/audit";
 import { gameParticipants, games, riotAccounts } from "@/db/schema";
 import { assertWithinIngestBudget } from "@/lib/ingest-budget";
+import { formatKoreaDateInput } from "@/lib/game-date";
 import {
   parseRofl,
   RoflParseError,
@@ -26,7 +27,7 @@ const MIN_PLAYED_AT = Date.UTC(2009, 0, 1);
 const MAX_TRANSACTION_ATTEMPTS = 3;
 
 function resolvePlayedAt(lastModified: number | null | undefined): {
-  playedAt: Date;
+  playedAt: string;
   playedAtSource: "file_mtime" | "upload";
 } {
   if (
@@ -35,9 +36,15 @@ function resolvePlayedAt(lastModified: number | null | undefined): {
     lastModified > MIN_PLAYED_AT &&
     lastModified <= Date.now() + 24 * 60 * 60 * 1000
   ) {
-    return { playedAt: new Date(lastModified), playedAtSource: "file_mtime" };
+    return {
+      playedAt: formatKoreaDateInput(new Date(lastModified)),
+      playedAtSource: "file_mtime",
+    };
   }
-  return { playedAt: new Date(), playedAtSource: "upload" };
+  return {
+    playedAt: formatKoreaDateInput(new Date()),
+    playedAtSource: "upload",
+  };
 }
 
 function sha256Hex(bytes: Uint8Array): string {

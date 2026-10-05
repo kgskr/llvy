@@ -18,6 +18,7 @@ export type AuditChanges = {
   gameId?: string;
   reason?: string;
   administrator?: boolean;
+  comment?: string | null;
 };
 export type AuditEvent = {
   action: string;
@@ -43,6 +44,7 @@ function safeChanges(changes: AuditChanges | undefined) {
     "gameId",
     "reason",
     "administrator",
+    "comment",
   ] as const) {
     const value = changes[key];
     if (

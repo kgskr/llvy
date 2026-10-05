@@ -2,6 +2,7 @@ import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  date,
   index,
   integer,
   jsonb,
@@ -115,7 +116,7 @@ export const riotAccounts = pgTable(
 /**
  * A single ingested game. `playedAt` is always populated: a .rofl carries no
  * date, so it comes from the uploaded file's lastModified, falling back to the
- * upload time. `playedAtSource` records which was used.
+ * upload date. Only the Korea calendar date is stored.
  */
 export const games = pgTable(
   "games",
@@ -124,9 +125,10 @@ export const games = pgTable(
     fileHash: text("file_hash").notNull().unique(),
     blobUrl: text("blob_url").notNull(),
     originalFilename: text("original_filename"),
-    playedAt: timestamp("played_at", { withTimezone: true }).notNull(),
+    playedAt: date("played_at", { mode: "string" }).notNull(),
     playedAtSource: text("played_at_source").notNull(),
-    playedAtOverride: timestamp("played_at_override", { withTimezone: true }),
+    playedAtOverride: date("played_at_override", { mode: "string" }),
+    comment: text("comment"),
     excludedAt: timestamp("excluded_at", { withTimezone: true }),
     durationMs: integer("duration_ms"),
     gameVersion: text("game_version"),
@@ -137,6 +139,7 @@ export const games = pgTable(
       .notNull(),
   },
   (t) => [
+    check("games_comment_length", sql`char_length(${t.comment}) <= 30`),
     index("games_played_at_idx").on(t.playedAt),
     index("games_active_effective_date_idx")
       .on(

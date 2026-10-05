@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { resolveChampionNames } from "@/lib/champions";
 import {
-  formatDate,
+  formatGameDate,
   formatDuration,
   positionLabel,
   riotId,
@@ -250,7 +250,7 @@ export default async function MemberHistoryPage({
                   {games.map((game) => (
                     <tr key={game.id}>
                       <td>
-                        {formatDate(game.playedAt)}
+                        {formatGameDate(game.playedAt)}
                         <small className="table-note">
                           {playedAtSourceLabel(game.playedAtSource)}
                         </small>

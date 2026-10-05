@@ -4,10 +4,10 @@ import { notFound } from "next/navigation";
 import { resolveChampionNames } from "@/lib/champions";
 import type { GameParticipantRow } from "@/lib/games";
 import { getGameDetailReadModel } from "@/lib/read-model";
-import { formatKoreaDateInput, playedAtSourceLabel } from "@/lib/game-date";
+import { playedAtSourceLabel } from "@/lib/game-date";
 import { parsePageNumber } from "@/lib/validation";
 import {
-  formatDate,
+  formatGameDate,
   formatDuration,
   POSITION_ORDER,
   positionLabel,
@@ -17,6 +17,7 @@ import {
 
 import {
   GameDateForm,
+  GameCommentForm,
   GameFeedbackProvider,
   GameVisibilityForm,
 } from "../forms";
@@ -73,13 +74,26 @@ export default async function GameDetailPage({
         </p>
         <h1>게임 상세</h1>
         <p className="muted">
-          {formatDate(game.playedAt)}
+          {formatGameDate(game.playedAt)}
           {` (${playedAtSourceLabel(game.playedAtSource)})`} ·{" "}
           {formatDuration(game.durationMs)}
           {game.gameVersion ? ` · v${game.gameVersion}` : null}
         </p>
       </div>
       <GameFeedbackProvider>
+        <section className="card stack" aria-label="게임 코멘트">
+          <h2>게임 코멘트</h2>
+          <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+            {game.comment ?? "등록된 코멘트가 없습니다."}
+          </p>
+          {isAdmin ? (
+            <GameCommentForm
+              key={JSON.stringify(game.comment)}
+              gameId={game.id}
+              currentValue={game.comment}
+            />
+          ) : null}
+        </section>
         {game.excludedAt ? (
           <section className="card stack" aria-label="제외된 경기 안내">
             <h2>제외된 경기</h2>
@@ -114,14 +128,14 @@ export default async function GameDetailPage({
           <section className="card stack">
             <h2>경기 날짜 수정</h2>
             <p className="muted">
-              원본 날짜: {formatDate(game.originalPlayedAt)} (
+              원본 날짜: {formatGameDate(game.originalPlayedAt)} (
               {playedAtSourceLabel(game.originalPlayedAtSource)})
             </p>
             <GameDateForm
-              key={`${game.playedAt.toISOString()}:${Boolean(game.playedAtOverride)}`}
+              key={`${game.playedAt}:${Boolean(game.playedAtOverride)}`}
               gameId={game.id}
-              currentValue={formatKoreaDateInput(game.playedAt)}
-              originalValue={formatKoreaDateInput(game.originalPlayedAt)}
+              currentValue={game.playedAt}
+              originalValue={game.originalPlayedAt}
               hasOverride={Boolean(game.playedAtOverride)}
             />
           </section>

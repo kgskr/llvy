@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { getGameListReadModel } from "@/lib/read-model";
-import { formatDate, formatDuration, teamLabel } from "@/lib/format";
+import { formatGameDate, formatDuration, teamLabel } from "@/lib/format";
 import { playedAtSourceLabel } from "@/lib/game-date";
 
 import { GameFeedbackProvider, GameVisibilityForm } from "./forms";
@@ -75,6 +75,7 @@ export default async function GamesPage({
                   <th>길이</th>
                   <th>승리 팀</th>
                   <th>인원</th>
+                  <th>코멘트</th>
                   <th />
                   {canRestore ? <th>복구</th> : null}
                 </tr>
@@ -83,7 +84,7 @@ export default async function GamesPage({
                 {games.map((game) => (
                   <tr key={game.id}>
                     <td>
-                      {formatDate(game.playedAt)}
+                      {formatGameDate(game.playedAt)}
                       <span className="muted">
                         {" "}
                         ({playedAtSourceLabel(game.playedAtSource)})
@@ -92,7 +93,14 @@ export default async function GamesPage({
                     <td>{formatDuration(game.durationMs)}</td>
                     <td>{teamLabel(game.winningTeam)}</td>
                     <td>{game.participantCount}</td>
-
+                    <td
+                      style={{
+                        whiteSpace: "pre-wrap",
+                        overflowWrap: "anywhere",
+                      }}
+                    >
+                      {game.comment ?? "—"}
+                    </td>
                     <td>
                       <Link
                         href={`/games/${game.id}?view=${visibility}&page=${page}`}

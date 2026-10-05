@@ -48,7 +48,8 @@ import { ingestReplay } from "./ingest";
 import { getMemberHistory } from "./member-history";
 import { createMember, linkAccount, unlinkAccount } from "./members";
 
-const day = (offset: number) => new Date(Date.UTC(2026, 8, 1 + offset, 12));
+const day = (offset: number) =>
+  new Date(Date.UTC(2026, 8, 1 + offset, 12)).toISOString().slice(0, 10);
 const emptyStats = {
   totalGames: 0,
   wins: 0,
@@ -81,7 +82,7 @@ async function storeGame(
     bytes,
     blobUrl,
     originalFilename: `match-${sequence}.rofl`,
-    lastModified: playedAt.getTime(),
+    lastModified: Date.parse(`${playedAt}T12:00:00Z`),
   });
   return { ...result, bytes, blobUrl, playedAt };
 }
@@ -146,7 +147,7 @@ describe("match management persistence", () => {
       );
       await previousClient.query(
         "INSERT INTO games (id, file_hash, blob_url, played_at, played_at_source, duration_ms, raw_metadata) VALUES ($1, 'original-hash', 'https://example.invalid/original.rofl', $2, 'file_mtime', 1200000, '{\"gameLength\":1200000}')",
-        [gameId, day(0).toISOString()],
+        [gameId, `${day(0)}T12:00:00Z`],
       );
       await previousClient.query(
         "INSERT INTO game_participants (game_id, riot_account_id, team, champion, kills) VALUES ($1, $2, 100, 'Ahri', 8)",
@@ -163,8 +164,10 @@ describe("match management persistence", () => {
       }>("SELECT row_to_json(g) AS game FROM games g");
       expect(after.rows[0].game).toEqual({
         ...before.rows[0].game,
+        played_at: day(0),
         excluded_at: null,
         played_at_override: null,
+        comment: null,
       });
       const preserved = await previousClient.query(
         "SELECT p.champion, p.kills, a.member_id FROM game_participants p JOIN riot_accounts a ON a.id = p.riot_account_id",
@@ -175,7 +178,7 @@ describe("match management persistence", () => {
       const applied = await previousClient.query<{ count: number }>(
         'SELECT count(*)::int AS count FROM drizzle."__drizzle_migrations"',
       );
-      expect(applied.rows[0].count).toBe(5);
+      expect(applied.rows[0].count).toBe(journal.entries.length);
     } finally {
       await previousClient.close();
       await rm(oldMigrations, { recursive: true, force: true });

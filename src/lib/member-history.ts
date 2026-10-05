@@ -10,7 +10,7 @@ export type MemberGameResult = "win" | "loss" | "unknown";
 
 export type MemberHistoryGame = {
   id: string;
-  playedAt: Date;
+  playedAt: string;
   playedAtSource: string;
   durationMs: number | null;
   champion: string | null;
@@ -76,7 +76,7 @@ export async function getMemberHistory(
       .select({
         id: games.id,
         playedAt:
-          sql<Date>`coalesce(${games.playedAtOverride}, ${games.playedAt})`
+          sql<string>`coalesce(${games.playedAtOverride}, ${games.playedAt})`
             .mapWith(games.playedAt)
             .as("effective_played_at"),
         playedAtSource: sql<string>`case

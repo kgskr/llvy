@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 import { eq } from "drizzle-orm";
 import {
@@ -25,6 +26,7 @@ vi.mock("server-only", () => ({}));
 vi.mock("@/db", async () => ({ db: (await import("@/test/database")).db }));
 
 import { countGames, getGameDetail, listGames } from "./games";
+import { formatKoreaDateInput } from "./game-date";
 import { ingestReplay } from "./ingest";
 import {
   createMember,
@@ -35,7 +37,8 @@ import {
   updateMember,
 } from "./members";
 
-const playedAt = new Date("2026-09-01T12:34:56.000Z");
+const playedAtInstant = new Date("2026-09-01T12:34:56.000Z");
+const playedAt = "2026-09-01";
 
 function ingest(
   bytes = replayBytes(),
@@ -45,7 +48,7 @@ function ingest(
     bytes,
     blobUrl: "https://example.invalid/replays/game.rofl",
     originalFilename: "game.rofl",
-    lastModified: playedAt.getTime(),
+    lastModified: playedAtInstant.getTime(),
     ...overrides,
   });
 }
@@ -79,7 +82,14 @@ describe("stored migrations and replay ingestion", () => {
     const journal = await client.query<{ count: number }>(
       'SELECT count(*)::int AS count FROM drizzle."__drizzle_migrations"',
     );
-    expect(journal.rows[0].count).toBe(5);
+    expect(journal.rows[0].count).toBe(
+      JSON.parse(
+        readFileSync(
+          new URL("../../drizzle/meta/_journal.json", import.meta.url),
+          "utf8",
+        ),
+      ).entries.length,
+    );
   });
 
   it.each(["legacy", "rofl2"] as const)(
@@ -97,6 +107,7 @@ describe("stored migrations and replay ingestion", () => {
           id: result.gameId,
           playedAt,
           playedAtSource: "file_mtime",
+          comment: null,
           durationMs: 1834567,
           winningTeam: 100,
           participantCount: 10,
@@ -139,7 +150,7 @@ describe("stored migrations and replay ingestion", () => {
     const duplicate = await ingest(replayBytes(), {
       blobUrl: "https://example.invalid/replays/duplicate.rofl",
       originalFilename: "duplicate.rofl",
-      lastModified: playedAt.getTime() - 86_400_000,
+      lastModified: playedAtInstant.getTime() - 86_400_000,
     });
     expect(duplicate).toEqual({ gameId: original.gameId, duplicate: true });
     expect(await rowCounts()).toEqual({
@@ -391,8 +402,10 @@ describe("stored migrations and replay ingestion", () => {
       const { gameId } = await ingest(replayBytes(), { lastModified });
       const detail = await getGameDetail(gameId);
       expect(detail?.playedAtSource).toBe("upload");
-      expect(detail?.playedAt.getTime()).toBeGreaterThanOrEqual(before);
-      expect(detail?.playedAt.getTime()).toBeLessThanOrEqual(Date.now());
+      expect(detail!.playedAt >= formatKoreaDateInput(new Date(before))).toBe(
+        true,
+      );
+      expect(detail!.playedAt <= formatKoreaDateInput(new Date())).toBe(true);
     },
   );
 
@@ -401,7 +414,7 @@ describe("stored migrations and replay ingestion", () => {
     const older = await ingest(
       replayBytes({ metadata: { gameVersion: "14.22.1.1" } }),
       {
-        lastModified: playedAt.getTime() - 86_400_000,
+        lastModified: playedAtInstant.getTime() - 86_400_000,
       },
     );
     expect(await countGames()).toBe(2);

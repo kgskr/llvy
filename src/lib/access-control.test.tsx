@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   getMemberHistory: vi.fn(),
   setGameExcluded: vi.fn(),
   setGamePlayedAt: vi.fn(),
+  setGameComment: vi.fn(),
   getGameDetail: vi.fn(),
   countGames: vi.fn(),
   listGames: vi.fn(),
@@ -70,6 +71,7 @@ vi.mock("@/lib/members", () => ({
 vi.mock("@/lib/game-mutations", () => ({
   setGameExcluded: mocks.setGameExcluded,
   setGamePlayedAt: mocks.setGamePlayedAt,
+  setGameComment: mocks.setGameComment,
 }));
 vi.mock("@/lib/games", () => ({
   getGameDetail: mocks.getGameDetail,
@@ -163,6 +165,7 @@ import {
   setGameExcludedAction,
   updateGameDateAction,
   restoreGameDateAction,
+  updateGameCommentAction,
 } from "@/app/(app)/games/actions";
 import AdminPage from "@/app/(app)/admin/page";
 import AppLayout from "@/app/(app)/layout";
@@ -193,6 +196,7 @@ const MUTATIONS = [
   setGameExcludedAction,
   updateGameDateAction,
   restoreGameDateAction,
+  updateGameCommentAction,
 ];
 const WRITES = [
   mocks.createMember,
@@ -202,6 +206,7 @@ const WRITES = [
   mocks.deleteMember,
   mocks.setGameExcluded,
   mocks.setGamePlayedAt,
+  mocks.setGameComment,
   mocks.revalidatePath,
 ];
 
@@ -219,7 +224,7 @@ function mutationForm() {
     accountId: randomUUID(),
     gameId: GAME_ID,
     excluded: "true",
-    playedAt: "2026-10-02T21:00",
+    playedAt: "2026-10-02",
     comment: "  권한 테스트  ",
     role: "admin",
     confirmed: "yes",
@@ -228,9 +233,9 @@ function mutationForm() {
 
 const GAME = {
   id: GAME_ID,
-  playedAt: new Date("2026-10-02T12:00:00Z"),
+  playedAt: "2026-10-02",
   playedAtSource: "file_mtime",
-  originalPlayedAt: new Date("2026-10-02T12:00:00Z"),
+  originalPlayedAt: "2026-10-02",
   originalPlayedAtSource: "file_mtime",
   playedAtOverride: null,
   comment: "공유 코멘트",
@@ -671,6 +676,10 @@ describe("verified role visibility", () => {
         );
         expect(html).toContain("게임 상세");
         expect(html.includes('data-management="date"')).toBe(role !== "viewer");
+        expect(html.includes('data-management="comment"')).toBe(
+          role !== "viewer",
+        );
+        expect(html).toContain("공유 코멘트");
         expect(
           html.includes(
             `data-management="${excluded ? "restore" : "exclude"}"`,

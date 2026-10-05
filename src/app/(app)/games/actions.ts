@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache";
 
 import { validateGameDateInput } from "@/lib/game-date";
-import { setGameExcluded, setGamePlayedAt } from "@/lib/game-mutations";
+import { validateGameComment } from "@/lib/game-comment";
+import {
+  setGameComment,
+  setGameExcluded,
+  setGamePlayedAt,
+} from "@/lib/game-mutations";
 import { assertAdmin, ForbiddenError, UnauthorizedError } from "@/lib/session";
 import { isUuid } from "@/lib/validation";
 
@@ -39,6 +44,7 @@ function revalidateGames() {
   revalidatePath("/games/[id]", "page");
   revalidatePath("/members");
   revalidatePath("/members/[id]", "page");
+  revalidatePath("/admin");
 }
 
 const INVALID_GAME: GameActionResult = {
@@ -102,5 +108,27 @@ export async function restoreGameDateAction(
     if (!(await setGamePlayedAt(gameId, null))) return MISSING_GAME;
     revalidateGames();
     return { status: "success", message: "원본 경기 날짜로 되돌렸습니다." };
+  });
+}
+
+export async function updateGameCommentAction(
+  _previousState: GameActionState,
+  formData: FormData,
+): Promise<GameActionState> {
+  return runGameAction(async () => {
+    const gameId = formData.get("gameId");
+    if (!isUuid(gameId)) return INVALID_GAME;
+    const input = validateGameComment(formData.get("comment"));
+    if (!input.ok) return { status: "error", message: input.error };
+    if (!(await setGameComment(gameId, input.comment ?? "")))
+      return MISSING_GAME;
+    revalidateGames();
+    return {
+      status: "success",
+      message:
+        input.comment === null
+          ? "게임 코멘트를 지웠습니다."
+          : "게임 코멘트를 저장했습니다.",
+    };
   });
 }
