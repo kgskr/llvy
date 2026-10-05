@@ -30,7 +30,7 @@ The system SHALL accept both the legacy `.rofl` container (magic bytes `RIOT` `0
 
 ### Requirement: Extract per-participant statistics
 
-The system SHALL extract statistics for every participant in the replay. For each participant the system MUST extract the Riot ID (game name and tag line), the champion played, the team, the position, and win/loss. The system SHALL additionally extract kills, deaths, assists, and gold earned, and SHALL retain the full raw per-participant stats payload for fields not yet modeled.
+The system SHALL extract statistics for every participant in the replay. For each participant the system MUST extract the Riot ID (game name and tag line), the champion played, the team, the position, and win/loss. The system SHALL additionally extract kills, deaths, assists, and gold earned, and SHALL retain only a bounded scalar allowlist of diagnostic participant fields. Arbitrary unknown fields, nested values, and strings longer than the retained-value limit SHALL NOT be persisted as raw participant JSON. The original replay remains in Blob storage.
 
 #### Scenario: Each participant is extracted with required and bonus stats
 - **WHEN** a valid replay containing ten participants is parsed

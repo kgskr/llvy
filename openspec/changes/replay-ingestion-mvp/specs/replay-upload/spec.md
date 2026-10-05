@@ -2,14 +2,14 @@
 
 ### Requirement: Shared-password access control for uploads
 
-The system SHALL require a single shared password before allowing a replay upload. Requests without a valid password MUST be rejected and MUST NOT initiate any upload or storage.
+The system SHALL verify a single shared password at login and issue a signed session cookie. Upload reservation, token issuance, and processing SHALL require a valid session; unauthenticated requests MUST NOT initiate upload or storage. Passwords SHALL NOT be sent in upload or processing request bodies.
 
 #### Scenario: Correct password grants upload access
 - **WHEN** a user submits the correct shared password
 - **THEN** the system grants access to the upload flow for that session
 
 #### Scenario: Incorrect or missing password is rejected
-- **WHEN** a user attempts to upload without a password or with an incorrect password
+- **WHEN** a user attempts to upload without a valid session, including after an unsuccessful password login
 - **THEN** the system rejects the request, returns an authorization error, and does not create any Blob object or database record
 
 ### Requirement: Large replay upload via direct Blob upload
@@ -39,15 +39,15 @@ The system SHALL compute a content hash of each uploaded replay and SHALL preven
 
 ### Requirement: Capture the replay's source timestamp for the game date
 
-Because a `.rofl` file contains no play date, the system SHALL capture the uploaded file's last-modified time (the browser `File.lastModified`) at upload and pass it to processing so it can serve as the game's play date, with the upload time as a fallback.
+Because a `.rofl` file contains no play date, the system SHALL capture the uploaded file's last-modified time (the browser `File.lastModified`) at upload and pass it to processing so it can serve as the game's play date, with the server time at ingestion as a fallback.
 
 #### Scenario: File last-modified time is forwarded for dating
 - **WHEN** a user uploads a replay whose file has a last-modified time
 - **THEN** the system forwards that last-modified time to processing to be stored as the game's play date
 
-#### Scenario: Missing or invalid file time falls back to upload time
+#### Scenario: Missing or invalid file time falls back to ingestion time
 - **WHEN** the uploaded file has no usable last-modified time
-- **THEN** the system uses the upload time as the game's play date
+- **THEN** the system uses the server time at ingestion as the game's play date
 
 ### Requirement: Trigger parsing and storage after upload
 

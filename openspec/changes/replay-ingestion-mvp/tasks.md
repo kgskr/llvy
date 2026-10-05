@@ -8,7 +8,7 @@
 ## 2. 데이터베이스 스키마 (Drizzle)
 
 - [x] 2.1 `members` 테이블 정의: `id`(uuid PK), `name`, `birth_year`, `created_at`
-- [x] 2.2 `riot_accounts` 테이블 정의: `id`, `member_id`(nullable FK→members), `game_name`, `tag_line`, `puuid`, `first_seen_at`, `linked_at`, UNIQUE(game_name, tag_line)
+- [x] 2.2 `riot_accounts` 테이블 정의: `id`, `member_id`(nullable FK→members), `game_name`, `tag_line`, `puuid`, `first_seen_at`, `linked_at`, PUUID가 있는 행의 UNIQUE(puuid)와 PUUID가 없는 행의 UNIQUE(game_name, tag_line) 부분 인덱스
 - [x] 2.3 `games` 테이블 정의: `id`, `file_hash`(UNIQUE), `blob_url`, `original_filename`, `played_at`(NOT NULL), `played_at_source`('file_mtime'|'upload'), `duration_ms`, `game_version`, `winning_team`, `raw_metadata`(jsonb), `uploaded_at`
 - [x] 2.4 `game_participants` 테이블 정의: `id`, `game_id`(FK→games, cascade), `riot_account_id`(FK→riot_accounts), `team`, `position`(nullable), `champion`, `win`, `kills`, `deaths`, `assists`, `gold_earned`, `raw_stats`(jsonb), UNIQUE(game_id, riot_account_id)
 - [x] 2.5 `drizzle-kit`으로 초기 마이그레이션 생성·적용하고 로컬 DB에서 검증 — 실제 SQL migrations를 PGlite PostgreSQL 엔진에 적용·재적용하는 통합 테스트 통과(외부 DB 적용은 9.1)
@@ -40,8 +40,8 @@
 
 - [x] 6.1 처리 라우트(`/api/process`) 구현: Blob URL + 세션 인증 수신 → Blob에서 파일 취득 → sha256 해시 계산
 - [x] 6.2 파일 해시로 중복 검사: 이미 존재하면 게임 미생성 + "이미 존재" 응답 (replay-upload / match-storage 스펙)
-- [x] 6.3 참가자별 `(game_name, tag_line)` find-or-create로 `riot_accounts` 확보(없으면 member_id=NULL로 보류)
-- [x] 6.4 `played_at` 산정: 전달된 `File.lastModified`가 유효하면 사용(`played_at_source='file_mtime'`), 없으면 업로드 시각(`played_at_source='upload'`)
+- [x] 6.3 PUUID 우선 식별, PUUID 없는 경우 명확한 Riot ID 후보 재사용으로 `riot_accounts` 확보(새 계정은 member_id=NULL로 보류)
+- [x] 6.4 `played_at` 산정: 전달된 `File.lastModified`가 유효하면 사용(`played_at_source='file_mtime'`), 없으면 인입 시점 서버 현재 시각(`played_at_source='upload'`)
 - [x] 6.5 게임 + 참가자 레코드를 단일 트랜잭션으로 저장, 실패 시 롤백(부분 저장 금지) (match-storage 스펙)
 - [x] 6.6 업로드 성공 후 클라이언트가 처리 라우트를 호출하도록 연결하고, 멱등성(해시 기준) 보장
 - [x] 6.7 검증: 업로드→파싱→저장 end-to-end, 동일 리플레이 재업로드 시 중복 미생성, played_at 출처 확인 — 운영 Chrome→private Blob→처리 라우트→Neon 저장·조회 확인. 실제 솔랭 파일 3회 업로드 후 동일 게임 1개·참가자 10명·원래 file_mtime 날짜 유지(2026-10-04)
@@ -57,7 +57,7 @@
 
 - [x] 8.1 게임 목록 화면: 게임 날짜(played_at) 최신순 정렬, 요약(게임 날짜·길이·승리 팀·참가자 수) 표시 (match-storage 스펙)
 - [x] 8.2 게임 상세 화면: 팀별 참가자 그룹, 라이엇 아이디·챔피언·포지션·KDA·gold·승패 표시, 연결된 모임원 이름 노출, 포지션 불명은 별도 표기 (match-storage 스펙)
-- [x] 8.3 챔피언 표시명 변환: `SKIN`(내부명, 예: MonkeyKing) → DataDragon 챔피언 맵으로 표시명 매핑(버전별 맵 캐싱)
+- [x] 8.3 챔피언 표시명 변환: `SKIN`(내부명, 예: MonkeyKing) → 최신 DataDragon 한국어 맵 하나로 표시명 매핑(fetch 하루 재검증 설정 + 성공한 맵의 프로세스 메모리 캐시, 2초 제한 및 내부명 폴백)
 
 ## 9. 배포 & 마무리
 
@@ -70,7 +70,7 @@
 - [x] 10.1 모임원 이름·생년 수정 UI, 입력 검증과 저장 피드백을 구현한다
 - [x] 10.2 게임 목록에 페이지 이동을 추가하고 잘못된 게임 UUID는 404로 처리한다
 - [x] 10.3 필수 참가자/게임 정보 검증, PostgreSQL 정수 범위, UTF-8 byte budget, 중복 계정 참가자의 원자적 거부를 검증한다
-- [x] 10.4 PUUID가 없는 계정과 명확히 대응되는 PUUID 계정의 연결을 보존하고 모호한 이름은 자동 병합하지 않는다
+- [x] 10.4 PUUID 없는 리플레이는 명확한 계정을 재사용한다. 새 PUUID는 유일한 미연결 구버전 계정만 승격하고 이미 연결된 구버전 계정은 수동 연결 전까지 분리한다. 모호한 이름은 자동 병합하지 않는다
 - [x] 10.5 상태 기록 실패 후 canonical Blob 보존, 업로드 덮어쓰기 금지, 잘못된 API 입력 처리를 회귀 테스트로 검증한다
 - [x] 10.6 공유 비밀번호·서명 키 교체 시 세션 무효화와 로그인 복귀 경로 검증을 보완한다
 - [x] 10.7 실제 솔랭 ROFL2 샘플로 파서·처리 라우트·PGlite 저장/조회/중복/모임원 연결을 검증하고, JSON에 없는 게임 버전을 ROFL2 헤더에서 읽도록 보완한다(2026-10-03)

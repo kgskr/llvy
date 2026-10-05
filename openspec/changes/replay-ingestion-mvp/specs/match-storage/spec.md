@@ -22,15 +22,15 @@ The system SHALL store each replay's content hash on its game record and MUST en
 
 ### Requirement: Store an always-populated game play date
 
-Every stored game MUST have a non-null play date. Since a `.rofl` contains no date, the system SHALL set the play date from the uploaded file's last-modified time when available, otherwise from the upload time, and SHALL record which source was used.
+Every stored game MUST have a non-null play date. Since a `.rofl` contains no date, the system SHALL set the play date from the uploaded file's last-modified time when available, otherwise from the server time when ingestion selects the date, and SHALL record which source was used.
 
 #### Scenario: Play date set from file time
 - **WHEN** a game is stored and the upload provided a file last-modified time
 - **THEN** the game's play date is that file time and the recorded source indicates the file's last-modified time
 
-#### Scenario: Play date falls back to upload time
+#### Scenario: Play date falls back to ingestion time
 - **WHEN** a game is stored and no usable file last-modified time was provided
-- **THEN** the game's play date is the upload time and the recorded source indicates the upload time
+- **THEN** the game's play date is the server time when ingestion selects the date and the recorded source indicates the upload time
 
 ### Requirement: List stored games
 
