@@ -1,11 +1,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
-vi.mock("@/lib/pending-upload-store", () => ({ createPendingUpload: vi.fn() }));
-vi.mock("@/lib/session", () => ({ hasValidSession: vi.fn() }));
+vi.mock("@/lib/pending-upload-store", () => ({
+  createPendingUpload: vi.fn(),
+  UploadBudgetExceeded: class UploadBudgetExceeded extends Error {},
+}));
+vi.mock("@/lib/session", () => ({ getValidSessionToken: vi.fn() }));
 
-import { createPendingUpload } from "@/lib/pending-upload-store";
-import { hasValidSession } from "@/lib/session";
+import {
+  createPendingUpload,
+  UploadBudgetExceeded,
+} from "@/lib/pending-upload-store";
+import { getValidSessionToken } from "@/lib/session";
 
 import { POST } from "./route";
 
@@ -22,7 +28,7 @@ describe("POST /api/uploads", () => {
     vi.resetAllMocks();
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_test_secret");
     vi.stubEnv("BLOB_ACCESS", undefined);
-    vi.mocked(hasValidSession).mockResolvedValue(true);
+    vi.mocked(getValidSessionToken).mockResolvedValue("session-token");
   });
 
   afterEach(() => vi.unstubAllEnvs());
@@ -42,7 +48,9 @@ describe("POST /api/uploads", () => {
 
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ ...binding, access });
-      expect(createPendingUpload).toHaveBeenCalledTimes(1);
+      expect(createPendingUpload).toHaveBeenCalledExactlyOnceWith(
+        "session-token",
+      );
     },
   );
 
@@ -63,12 +71,23 @@ describe("POST /api/uploads", () => {
   );
 
   it("rejects unauthenticated uploads without creating a binding", async () => {
-    vi.mocked(hasValidSession).mockResolvedValue(false);
+    vi.mocked(getValidSessionToken).mockResolvedValue(null);
 
     const response = await POST(request({ filename: "match.rofl" }));
 
     expect(response.status).toBe(401);
     expect(createPendingUpload).not.toHaveBeenCalled();
+  });
+
+  it("returns 429 when the shared reservation budget is exhausted", async () => {
+    vi.mocked(createPendingUpload).mockRejectedValue(
+      new UploadBudgetExceeded(),
+    );
+    const response = await POST(request({ filename: "match.rofl" }));
+    expect(response.status).toBe(429);
+    expect(await response.json()).toEqual({
+      error: "Upload limit reached. Try again later.",
+    });
   });
 
   it("rejects non-replay files without creating a binding", async () => {

@@ -1,7 +1,6 @@
 import { verifyPassword } from "./auth";
 import type { LoginThrottleLimits } from "./limits";
 import { checkLoginThrottle } from "./login-throttle";
-import type { RateLimitStore } from "./rate-limit";
 
 export type LoginAttempt = { ok: true } | { ok: false; error: string };
 
@@ -14,29 +13,25 @@ const FAILED_LOGIN_DELAY_MS = 400;
 /**
  * Core login decision, extracted from the server action for testability.
  *
- * Order matters: the throttle runs FIRST, so an over-limit request returns
+ * Order matters: the shared throttle runs FIRST, so an over-limit request returns
  * without the submitted password ever reaching password verification. Failed
  * verifications get a fixed delay to slow online guessing.
  *
- * `overrides` exists for tests (isolated store, tiny limits, spy verifier,
+ * `overrides` exists for tests (isolated throttle, tiny limits, spy verifier,
  * zero delay); production callers pass none of it.
  */
 export async function attemptLogin(
   password: string,
-  clientHint: string | null,
+  clientIp: string | null,
   overrides: {
     limits?: LoginThrottleLimits;
-    store?: RateLimitStore;
-    verify?: (password: string) => boolean;
+    throttle?: typeof checkLoginThrottle;
+    verify?: typeof verifyPassword;
     failedDelayMs?: number;
   } = {},
 ): Promise<LoginAttempt> {
-  const throttle = checkLoginThrottle(
-    clientHint,
-    overrides.limits,
-    overrides.store,
-  );
-  if (!throttle.ok) {
+  const throttle = overrides.throttle ?? checkLoginThrottle;
+  if (!(await throttle(clientIp, overrides.limits))) {
     return { ok: false, error: THROTTLED_MESSAGE };
   }
 

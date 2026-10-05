@@ -60,6 +60,7 @@ describe("POST /api/process", () => {
       pathname,
       state: "pending",
       blobUrl: null,
+      cleanupClaimedAt: null,
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 60_000),
     });

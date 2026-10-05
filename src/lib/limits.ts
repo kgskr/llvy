@@ -7,27 +7,23 @@
  * from tests and edge code.
  */
 
-/** Failed-login throttling (fixed window, pre-auth). */
+/** Failed-login throttling per Vercel-normalized client IP. */
 export type LoginThrottleLimits = {
-  /**
-   * Attempts allowed per client hint per window. The hint comes from forwarded
-   * headers, which are attacker-controlled, so this bucket is best-effort only.
-   */
   perClientAttempts: number;
-  /**
-   * Attempts allowed across ALL clients per window. This bucket is keyed by a
-   * constant, so rotating forwarded headers cannot escape it. Sized for a small
-   * club: a burst of typos won't hit it, a brute force will.
-   */
-  globalAttempts: number;
   windowMs: number;
 };
 
 export const LOGIN_THROTTLE_LIMITS: LoginThrottleLimits = {
   perClientAttempts: 10,
-  globalAttempts: 30,
   windowMs: 60_000,
 };
+
+/** Shared daily reservation budget for this small club. */
+export const UPLOAD_BUDGET = {
+  perSession: 10,
+  global: 50,
+  windowMs: 24 * 60 * 60 * 1000,
+} as const;
 
 /**
  * Budgets applied to replay metadata during parsing and ingestion. These bound

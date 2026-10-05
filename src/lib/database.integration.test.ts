@@ -79,7 +79,7 @@ describe("stored migrations and replay ingestion", () => {
     const journal = await client.query<{ count: number }>(
       'SELECT count(*)::int AS count FROM drizzle."__drizzle_migrations"',
     );
-    expect(journal.rows[0].count).toBe(3);
+    expect(journal.rows[0].count).toBe(4);
   });
 
   it.each(["legacy", "rofl2"] as const)(

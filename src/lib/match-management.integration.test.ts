@@ -175,7 +175,7 @@ describe("match management persistence", () => {
       const applied = await previousClient.query<{ count: number }>(
         'SELECT count(*)::int AS count FROM drizzle."__drizzle_migrations"',
       );
-      expect(applied.rows[0].count).toBe(3);
+      expect(applied.rows[0].count).toBe(4);
     } finally {
       await previousClient.close();
       await rm(oldMigrations, { recursive: true, force: true });

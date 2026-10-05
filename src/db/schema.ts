@@ -144,7 +144,7 @@ export const gameParticipants = pgTable(
  * `/api/blob/upload` mints tokens only for the bound pathname, and
  * `/api/process` fetches/deletes only the exact Blob bound here. Rows move
  * pending → processing → processed | failed and are never reusable after
- * leaving `pending`; expired/aged rows are swept opportunistically on create.
+ * leaving `pending`; expired rows are reconciled before removal.
  */
 export const pendingUploads = pgTable(
   "pending_uploads",
@@ -154,6 +154,7 @@ export const pendingUploads = pgTable(
     pathname: text("pathname").notNull(),
     state: text("state").notNull().default("pending"),
     blobUrl: text("blob_url"),
+    cleanupClaimedAt: timestamp("cleanup_claimed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .defaultNow()
       .notNull(),
@@ -161,6 +162,13 @@ export const pendingUploads = pgTable(
   },
   (t) => [index("pending_uploads_expires_at_idx").on(t.expiresAt)],
 );
+
+/** Atomic fixed-window budgets shared by all serverless instances. */
+export const requestBudgets = pgTable("request_budgets", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull(),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+});
 
 export const membersRelations = relations(members, ({ many }) => ({
   riotAccounts: many(riotAccounts),

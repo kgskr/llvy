@@ -101,7 +101,9 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
   });
 
   async function binding() {
-    const pending = await uploadStore.createPendingUpload();
+    const pending = await uploadStore.createPendingUpload(
+      "replay-test-session",
+    );
     const blobUrl = `https://replay-test.public.blob.vercel-storage.com/${pending.pathname}`;
     authorizedUrls.add(blobUrl);
     return { ...pending, blobUrl };

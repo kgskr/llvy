@@ -1,11 +1,12 @@
 import "server-only";
 
-import { and, eq, gt, lt } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 
 import { db } from "@/db";
 import { pendingUploads, type PendingUpload } from "@/db/schema";
-import { PENDING_UPLOAD_TTL_MS } from "@/lib/limits";
+import { PENDING_UPLOAD_TTL_MS, UPLOAD_BUDGET } from "@/lib/limits";
 import { generateNonce, hashNonce, replayPathname } from "@/lib/pending-upload";
+import { budgetKey, consumeRequestBudgets } from "@/lib/request-budget";
 
 export type CreatedPendingUpload = {
   uploadId: string;
@@ -14,14 +15,24 @@ export type CreatedPendingUpload = {
   pathname: string;
 };
 
-// Rows whose expiry passed more than a day ago are useless in any state;
-// sweeping them on create keeps the table bounded without a cron.
-const SWEEP_AGE_MS = 24 * 60 * 60 * 1000;
+export class UploadBudgetExceeded extends Error {}
 
-export async function createPendingUpload(): Promise<CreatedPendingUpload> {
-  await db
-    .delete(pendingUploads)
-    .where(lt(pendingUploads.expiresAt, new Date(Date.now() - SWEEP_AGE_MS)));
+export async function createPendingUpload(
+  sessionToken: string,
+): Promise<CreatedPendingUpload> {
+  const allowed = await consumeRequestBudgets([
+    {
+      key: budgetKey("upload:session", sessionToken),
+      limit: UPLOAD_BUDGET.perSession,
+      windowMs: UPLOAD_BUDGET.windowMs,
+    },
+    {
+      key: "upload:global",
+      limit: UPLOAD_BUDGET.global,
+      windowMs: UPLOAD_BUDGET.windowMs,
+    },
+  ]);
+  if (!allowed) throw new UploadBudgetExceeded();
 
   const uploadId = crypto.randomUUID();
   const nonce = generateNonce();

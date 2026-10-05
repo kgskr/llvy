@@ -32,11 +32,21 @@ describe("session tokens", () => {
     expect(await verifySessionToken(token)).toBe(true);
   });
 
+  it("issues distinct session identities within the same millisecond", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-05T00:00:00Z"));
+    const first = await createSessionToken();
+    const second = await createSessionToken();
+    expect(first).not.toBe(second);
+    expect(await verifySessionToken(first)).toBe(true);
+    expect(await verifySessionToken(second)).toBe(true);
+  });
+
   it("rejects missing or malformed tokens", async () => {
     expect(await verifySessionToken(undefined)).toBe(false);
     expect(await verifySessionToken("")).toBe(false);
     expect(await verifySessionToken("garbage")).toBe(false);
-    expect(await verifySessionToken("v1.123.notbase64$$$")).toBe(false);
+    expect(await verifySessionToken("v2.123.notbase64$$$")).toBe(false);
   });
 
   it("rejects a tampered payload", async () => {
@@ -45,7 +55,7 @@ describe("session tokens", () => {
       token.slice(0, token.lastIndexOf(".")),
       token.slice(token.lastIndexOf(".") + 1),
     ];
-    expect(await verifySessionToken(`v1.9999999999999.${sig}`)).toBe(false);
+    expect(await verifySessionToken(`v2.9999999999999.${sig}`)).toBe(false);
   });
 
   it("rejects a token signed with a different password", async () => {

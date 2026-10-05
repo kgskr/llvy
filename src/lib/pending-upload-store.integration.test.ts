@@ -29,6 +29,7 @@ import {
   createPendingUpload,
   finishPendingUpload,
   getPendingUpload,
+  UploadBudgetExceeded,
 } from "./pending-upload-store";
 
 beforeAll(migrateTestDatabase, 30_000);
@@ -38,7 +39,7 @@ afterAll(() => client.close());
 describe("pending upload persistence", () => {
   it("stores only a nonce hash and binds the generated pathname with an expiry", async () => {
     const before = Date.now();
-    const binding = await createPendingUpload();
+    const binding = await createPendingUpload("test-session");
     const stored = await getPendingUpload(binding.uploadId);
     expect(stored).toMatchObject({
       id: binding.uploadId,
@@ -58,7 +59,7 @@ describe("pending upload persistence", () => {
   });
 
   it("allows exactly one overlapping claim and keeps that request's Blob URL", async () => {
-    const { uploadId } = await createPendingUpload();
+    const { uploadId } = await createPendingUpload("test-session");
     const urls = [
       "https://example.invalid/a.rofl",
       "https://example.invalid/b.rofl",
@@ -79,7 +80,7 @@ describe("pending upload persistence", () => {
   it.each(["processed", "failed"] as const)(
     "never allows a %s upload to be claimed again",
     async (state) => {
-      const { uploadId } = await createPendingUpload();
+      const { uploadId } = await createPendingUpload("test-session");
       expect(
         await claimPendingUpload(uploadId, "https://example.invalid/game.rofl"),
       ).toBe(true);
@@ -95,7 +96,7 @@ describe("pending upload persistence", () => {
   );
 
   it("rejects expired and unknown bindings without changing them", async () => {
-    const { uploadId } = await createPendingUpload();
+    const { uploadId } = await createPendingUpload("test-session");
     await db
       .update(pendingUploads)
       .set({ expiresAt: new Date(Date.now() - 1) })
@@ -118,29 +119,27 @@ describe("pending upload persistence", () => {
     });
   });
 
-  it("sweeps rows expired for more than a day while retaining recent expiry and active rows", async () => {
-    const old = await createPendingUpload();
-    const recent = await createPendingUpload();
-    const active = await createPendingUpload();
-    await db
-      .update(pendingUploads)
-      .set({
-        expiresAt: new Date(Date.now() - 2 * 86_400_000),
-        state: "failed",
-      })
-      .where(eq(pendingUploads.id, old.uploadId));
-    await db
-      .update(pendingUploads)
-      .set({ expiresAt: new Date(Date.now() - 1_000) })
-      .where(eq(pendingUploads.id, recent.uploadId));
-    const newest = await createPendingUpload();
-    expect(await getPendingUpload(old.uploadId)).toBeNull();
-    for (const uploadId of [
-      recent.uploadId,
-      active.uploadId,
-      newest.uploadId,
-    ]) {
-      expect(await getPendingUpload(uploadId)).not.toBeNull();
+  it("enforces the session budget across concurrent reservations", async () => {
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 15 }, () => createPendingUpload("one-session")),
+    );
+    expect(
+      attempts.filter((result) => result.status === "fulfilled"),
+    ).toHaveLength(10);
+    expect(
+      attempts.filter((result) => result.status === "rejected"),
+    ).toHaveLength(5);
+    expect(await createPendingUpload("another-session")).toHaveProperty(
+      "uploadId",
+    );
+  });
+
+  it("bounds total reservations even when a user creates fresh sessions", async () => {
+    for (let i = 0; i < 50; i += 1) {
+      await createPendingUpload(`session-${i}`);
     }
+    await expect(createPendingUpload("session-51")).rejects.toBeInstanceOf(
+      UploadBudgetExceeded,
+    );
   });
 });

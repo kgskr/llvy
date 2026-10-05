@@ -24,6 +24,7 @@ const pending = {
   pathname,
   state: "pending",
   blobUrl: null,
+  cleanupClaimedAt: null,
   createdAt: new Date(),
   expiresAt,
 };

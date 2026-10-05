@@ -19,6 +19,6 @@ export async function migrateTestDatabase(): Promise<void> {
 
 export async function resetTestDatabase(): Promise<void> {
   await client.exec(
-    "TRUNCATE game_participants, games, riot_accounts, members, pending_uploads CASCADE",
+    "TRUNCATE game_participants, games, riot_accounts, members, pending_uploads, request_budgets CASCADE",
   );
 }

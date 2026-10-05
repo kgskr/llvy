@@ -12,8 +12,8 @@ export const SESSION_COOKIE = "llvy_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 const encoder = new TextEncoder();
-const PAYLOAD_PREFIX = "v1.";
-const HKDF_SALT = "llvy-session-hkdf-v1";
+const PAYLOAD_PREFIX = "v2.";
+const HKDF_SALT = "llvy-session-hkdf-v2";
 const HKDF_INFO = "llvy-session-hmac";
 
 function getPassword(): string {
@@ -104,7 +104,7 @@ export function verifyPassword(input: string): boolean {
 
 /** Create a signed session token to store in the session cookie. */
 export async function createSessionToken(): Promise<string> {
-  const payload = `${PAYLOAD_PREFIX}${Date.now()}`;
+  const payload = `${PAYLOAD_PREFIX}${Date.now()}.${crypto.randomUUID()}`;
   const key = await getSigningKey();
   const signature = await crypto.subtle.sign(
     "HMAC",
@@ -142,9 +142,9 @@ export async function verifySessionToken(
   );
   if (!validSignature) return false;
 
-  // Enforce expiry from the signed timestamp (payload = `v1.<ms>`), so a leaked
+  // Enforce expiry from the signed timestamp (payload = `v2.<ms>.<nonce>`), so a leaked
   // token is not valid forever. Reject non-finite, far-future, or aged tokens.
-  const issuedAt = Number(payload.slice(PAYLOAD_PREFIX.length));
+  const issuedAt = Number(payload.split(".")[1]);
   if (!Number.isFinite(issuedAt)) return false;
   const now = Date.now();
   if (issuedAt > now + 60_000) return false;

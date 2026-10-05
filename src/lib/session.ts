@@ -13,8 +13,13 @@ export class UnauthorizedError extends Error {
 
 /** Read and verify the session cookie. Use in route handlers / server actions. */
 export async function hasValidSession(): Promise<boolean> {
+  return (await getValidSessionToken()) !== null;
+}
+
+/** Return the verified cookie for per-session resource budgets. */
+export async function getValidSessionToken(): Promise<string | null> {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
-  return verifySessionToken(token);
+  return (await verifySessionToken(token)) ? token! : null;
 }
 
 /** Throw UnauthorizedError when there is no valid session. */

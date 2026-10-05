@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 
 import { getBlobStoreConfig } from "@/lib/blob-store";
-import { createPendingUpload } from "@/lib/pending-upload-store";
-import { hasValidSession } from "@/lib/session";
+import {
+  createPendingUpload,
+  UploadBudgetExceeded,
+} from "@/lib/pending-upload-store";
+import { getValidSessionToken } from "@/lib/session";
 
 // Issues a pending-upload binding: the unguessable { uploadId, nonce } pair the
 // client must present to /api/blob/upload (token minting) and /api/process
@@ -14,7 +17,8 @@ type UploadsBody = { filename?: unknown };
 
 export async function POST(request: Request): Promise<NextResponse> {
   // Independent auth check (defense-in-depth beyond the proxy).
-  if (!(await hasValidSession())) {
+  const sessionToken = await getValidSessionToken();
+  if (!sessionToken) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -53,7 +57,18 @@ export async function POST(request: Request): Promise<NextResponse> {
       { status: 503 },
     );
   }
-  const created = await createPendingUpload();
+  let created;
+  try {
+    created = await createPendingUpload(sessionToken);
+  } catch (error) {
+    if (error instanceof UploadBudgetExceeded) {
+      return NextResponse.json(
+        { error: "Upload limit reached. Try again later." },
+        { status: 429 },
+      );
+    }
+    throw error;
+  }
   // Expose only the store's access mode, never its read/write credential.
   return NextResponse.json({ ...created, access });
 }

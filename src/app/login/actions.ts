@@ -10,18 +10,16 @@ import {
 } from "@/lib/auth";
 import { attemptLogin } from "@/lib/login";
 import { sanitizeRedirect } from "@/lib/redirect";
+import { trustedClientIp } from "@/lib/trusted-client-ip";
 
 export type LoginState = { error: string } | null;
 
-/**
- * Best-effort hint for the per-client throttle bucket. Forwarded headers are
- * attacker-controlled, so this is NEVER the only throttle key — the always-on
- * global bucket inside attemptLogin() is the spoof-resistant floor.
- */
-async function clientHint(): Promise<string | null> {
-  const hdrs = await headers();
-  const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim();
-  return ip || null;
+/** Vercel replaces this header at its edge. Never trust caller-supplied XFF. */
+async function clientIp(): Promise<string | null> {
+  return trustedClientIp(await headers(), {
+    vercel: process.env.VERCEL,
+    nodeEnv: process.env.NODE_ENV,
+  });
 }
 
 export async function login(
@@ -33,7 +31,7 @@ export async function login(
     String(formData.get("redirectTo") ?? "/"),
   );
 
-  const attempt = await attemptLogin(password, await clientHint());
+  const attempt = await attemptLogin(password, await clientIp());
   if (!attempt.ok) {
     return { error: attempt.error };
   }
