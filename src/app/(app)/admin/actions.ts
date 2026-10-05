@@ -36,7 +36,7 @@ async function runAdminAction(
       return {
         status: "error",
         message:
-          "활성 관리자는 삭제할 수 없습니다. 서비스 오너가 관리자 지정을 취소한 후 삭제하세요.",
+          "활성 관리자는 삭제할 수 없습니다. 서비스 소유자에게 문의하세요.",
       };
     }
     console.error("Member administration failed", error);

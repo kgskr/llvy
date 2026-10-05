@@ -227,7 +227,7 @@ describe("member administration actions", () => {
       form({ memberId: MEMBER_ID, confirmed: "yes" }),
     );
     expect(result?.status).toBe("error");
-    expect(result?.message).toContain("서비스 오너가 관리자 지정을 취소");
+    expect(result?.message).toContain("서비스 소유자에게 문의하세요.");
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
