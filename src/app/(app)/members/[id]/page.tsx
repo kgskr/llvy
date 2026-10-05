@@ -9,9 +9,8 @@ import {
   riotId,
 } from "@/lib/format";
 import { playedAtSourceLabel } from "@/lib/game-date";
-import { getMemberHistory } from "@/lib/member-history";
+import { getMemberHistoryReadModel } from "@/lib/read-model";
 import { parsePageNumber } from "@/lib/validation";
-import { getSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -42,12 +41,13 @@ export default async function MemberHistoryPage({
     parsePageNumber(requestedPage),
     Math.floor(Number.MAX_SAFE_INTEGER / PAGE_SIZE),
   );
-  const [history, session] = await Promise.all([
-    getMemberHistory(id, PAGE_SIZE, (page - 1) * PAGE_SIZE),
-    getSession(),
-  ]);
+  const { history, role } = await getMemberHistoryReadModel(
+    id,
+    PAGE_SIZE,
+    (page - 1) * PAGE_SIZE,
+  );
   if (!history) notFound();
-  const isAdmin = session?.role === "admin";
+  const isAdmin = role !== "viewer";
   const pageCount = Math.max(
     1,
     Math.ceil(history.stats.totalGames / PAGE_SIZE),
@@ -219,13 +219,18 @@ export default async function MemberHistoryPage({
         <h2>최근 경기</h2>
         {games.length === 0 ? (
           <p className="empty-state">
-            집계할 경기가 없습니다.{" "}
-            <Link href="/upload">리플레이 업로드 →</Link>
+            집계할 경기가 없습니다.
+            {isAdmin ? (
+              <>
+                {" "}
+                <Link href="/upload">리플레이 업로드 →</Link>
+              </>
+            ) : null}
           </p>
         ) : (
           <>
             <p className="muted">
-              {page} / {pageCount}페이지 · 날짜는 한국 시간 기준
+              {page} / {pageCount}페이지
             </p>
             <div className="table-scroll">
               <table className="table">

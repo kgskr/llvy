@@ -5,7 +5,8 @@ import { getBlobStoreConfig } from "@/lib/blob-store";
 import { MAX_UPLOAD_BYTES } from "@/lib/limits";
 import { isUuid, validatePendingToken } from "@/lib/pending-upload";
 import { getPendingUpload } from "@/lib/pending-upload-store";
-import { hasValidSession } from "@/lib/session";
+import { matchesUploadActor } from "@/lib/upload-actor";
+import { getSession } from "@/lib/session";
 
 // Generates short-lived client upload tokens so the browser can upload large
 // .rofl files (10-30MB) directly to Blob, bypassing the 4.5MB function body
@@ -33,9 +34,12 @@ function parseBindingPayload(
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  if (!(await hasValidSession())) {
+  const session = await getSession();
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (session.role === "viewer")
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   let body: HandleUploadBody;
   try {
@@ -69,6 +73,9 @@ export async function POST(request: Request): Promise<NextResponse> {
         if (!row) {
           throw new Error("Unknown upload binding.");
         }
+        const current = await getSession();
+        if (!current || !matchesUploadActor(row, current))
+          throw new Error("Upload belongs to a different or revoked identity.");
         const validation = validatePendingToken(row, {
           nonce: binding.nonce,
           pathname,

@@ -1,3 +1,4 @@
+import { ownerSession } from "@/test/actor";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -5,13 +6,13 @@ vi.mock("@/lib/pending-upload-store", () => ({
   createPendingUpload: vi.fn(),
   UploadBudgetExceeded: class UploadBudgetExceeded extends Error {},
 }));
-vi.mock("@/lib/session", () => ({ getValidSessionToken: vi.fn() }));
+vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
 
 import {
   createPendingUpload,
   UploadBudgetExceeded,
 } from "@/lib/pending-upload-store";
-import { getValidSessionToken } from "@/lib/session";
+import { getSession } from "@/lib/session";
 
 import { POST } from "./route";
 
@@ -28,7 +29,7 @@ describe("POST /api/uploads", () => {
     vi.resetAllMocks();
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_test_secret");
     vi.stubEnv("BLOB_ACCESS", undefined);
-    vi.mocked(getValidSessionToken).mockResolvedValue("session-token");
+    vi.mocked(getSession).mockResolvedValue(ownerSession);
   });
 
   afterEach(() => vi.unstubAllEnvs());
@@ -50,6 +51,7 @@ describe("POST /api/uploads", () => {
       expect(await response.json()).toEqual({ ...binding, access });
       expect(createPendingUpload).toHaveBeenCalledExactlyOnceWith(
         "session-token",
+        ownerSession,
       );
     },
   );
@@ -71,11 +73,20 @@ describe("POST /api/uploads", () => {
   );
 
   it("rejects unauthenticated uploads without creating a binding", async () => {
-    vi.mocked(getValidSessionToken).mockResolvedValue(null);
+    vi.mocked(getSession).mockResolvedValue(null);
 
     const response = await POST(request({ filename: "match.rofl" }));
 
     expect(response.status).toBe(401);
+    expect(createPendingUpload).not.toHaveBeenCalled();
+  });
+
+  it("rejects viewer reservations before allocating storage", async () => {
+    vi.mocked(getSession).mockResolvedValue({
+      ...ownerSession,
+      role: "viewer",
+    });
+    expect((await POST(request({ filename: "match.rofl" }))).status).toBe(403);
     expect(createPendingUpload).not.toHaveBeenCalled();
   });
 

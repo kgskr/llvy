@@ -2,10 +2,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { resolveChampionNames } from "@/lib/champions";
-import { getGameDetail, type GameParticipantRow } from "@/lib/games";
+import type { GameParticipantRow } from "@/lib/games";
+import { getGameDetailReadModel } from "@/lib/read-model";
 import { formatKoreaDateInput, playedAtSourceLabel } from "@/lib/game-date";
 import { parsePageNumber } from "@/lib/validation";
-import { getSession } from "@/lib/session";
 import {
   formatDate,
   formatDuration,
@@ -41,9 +41,9 @@ export default async function GameDetailPage({
   searchParams: Promise<{ page?: string | string[]; view?: string | string[] }>;
 }) {
   const [{ id }, { page, view }] = await Promise.all([params, searchParams]);
-  const [game, session] = await Promise.all([getGameDetail(id), getSession()]);
+  const { game, role } = await getGameDetailReadModel(id);
   if (!game) notFound();
-  const isAdmin = session?.role === "admin";
+  const isAdmin = role !== "viewer";
   const returnToExcluded =
     view === "excluded" || (!view && Boolean(game.excludedAt));
   const backHref = `/games?${returnToExcluded ? "view=excluded&" : ""}page=${parsePageNumber(page)}`;

@@ -11,22 +11,26 @@ export default async function AppLayout({
 }) {
   const session = await getSession();
   if (!session) redirect("/login");
+  const isAdmin = session.role !== "viewer";
+  const roleLabel = {
+    viewer: "일반 사용자",
+    admin: "관리자",
+    owner: "서비스 오너",
+  }[session.role];
   return (
     <div className="app-shell">
       <header className="nav">
-        <Link href="/" className="nav-brand">
+        <Link href={isAdmin ? "/games" : "/"} className="nav-brand">
           LLVY
         </Link>
         <nav className="nav-links">
-          <Link href="/upload">업로드</Link>
+          {isAdmin ? <Link href="/upload">업로드</Link> : null}
           <Link href="/games">게임</Link>
           <Link href="/members">모임원</Link>
-          {session?.role === "admin" ? <Link href="/admin">관리</Link> : null}
+          {isAdmin ? <Link href="/admin">관리</Link> : null}
         </nav>
         <form action={logout}>
-          <span className="muted">
-            {session?.role === "admin" ? "관리자" : "업로더"}
-          </span>{" "}
+          <span className="muted">{roleLabel}</span>{" "}
           <button type="submit" className="nav-logout">
             로그아웃
           </button>

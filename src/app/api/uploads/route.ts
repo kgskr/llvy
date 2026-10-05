@@ -5,7 +5,7 @@ import {
   createPendingUpload,
   UploadBudgetExceeded,
 } from "@/lib/pending-upload-store";
-import { getValidSessionToken } from "@/lib/session";
+import { getSession } from "@/lib/session";
 
 // Issues a pending-upload binding: the unguessable { uploadId, nonce } pair the
 // client must present to /api/blob/upload (token minting) and /api/process
@@ -17,10 +17,12 @@ type UploadsBody = { filename?: unknown };
 
 export async function POST(request: Request): Promise<NextResponse> {
   // Independent auth check (defense-in-depth beyond the proxy).
-  const sessionToken = await getValidSessionToken();
-  if (!sessionToken) {
+  const session = await getSession();
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (session.role === "viewer")
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   let body: UploadsBody;
   try {
@@ -59,7 +61,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
   let created;
   try {
-    created = await createPendingUpload(sessionToken);
+    created = await createPendingUpload(session.token, session);
   } catch (error) {
     if (error instanceof UploadBudgetExceeded) {
       return NextResponse.json(

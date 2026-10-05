@@ -10,7 +10,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
-vi.mock("@/lib/members", () => ({
+vi.mock("@/lib/member-mutations", () => ({
   createMember: mocks.createMember,
   updateMember: mocks.updateMember,
   linkAccount: mocks.linkAccount,

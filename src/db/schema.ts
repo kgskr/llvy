@@ -1,6 +1,7 @@
 import { relations, sql } from "drizzle-orm";
 import {
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -24,6 +25,56 @@ export const members = pgTable("members", {
     .defaultNow()
     .notNull(),
 });
+
+/** Each grant has a new identity; revocation never revives old sessions. */
+export const adminCredentials = pgTable(
+  "admin_credentials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    memberId: uuid("member_id")
+      .notNull()
+      .references(() => members.id, { onDelete: "restrict" }),
+    keyHash: text("key_hash").notNull().unique(),
+    issuedAt: timestamp("issued_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("admin_credentials_active_member_idx")
+      .on(t.memberId)
+      .where(sql`${t.revokedAt} is null`),
+    check(
+      "admin_credentials_hash_format",
+      sql`${t.keyHash} ~ '^[0-9a-f]{64}$'`,
+    ),
+  ],
+);
+
+/** Append-only through the application; no secrets or raw requests. */
+export const auditLogs = pgTable(
+  "audit_logs",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    occurredAt: timestamp("occurred_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    actorRole: text("actor_role"),
+    actorMemberId: uuid("actor_member_id"),
+    actorCredentialId: uuid("actor_credential_id"),
+    actorName: text("actor_name"),
+    action: text("action").notNull(),
+    targetType: text("target_type").notNull(),
+    targetId: text("target_id"),
+    result: text("result").notNull(),
+    before: jsonb("before"),
+    after: jsonb("after"),
+    requestId: uuid("request_id").notNull(),
+  },
+  (t) => [
+    index("audit_logs_occurred_at_idx").on(t.occurredAt.desc(), t.id.desc()),
+  ],
+);
 
 /**
  * Riot accounts. A member can own several. `memberId` is NULL while the account
@@ -151,6 +202,10 @@ export const pendingUploads = pgTable(
   {
     id: uuid("id").primaryKey(),
     nonceHash: text("nonce_hash").notNull(),
+    actorRole: text("actor_role"),
+    actorMemberId: uuid("actor_member_id"),
+    actorCredentialId: uuid("actor_credential_id"),
+    actorName: text("actor_name"),
     pathname: text("pathname").notNull(),
     state: text("state").notNull().default("pending"),
     blobUrl: text("blob_url"),

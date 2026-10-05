@@ -2,6 +2,9 @@ import { del } from "@vercel/blob";
 import { NextResponse } from "next/server";
 
 import { getBlobStoreConfig } from "@/lib/blob-store";
+import type { Actor } from "@/lib/auth";
+import { recordAudit } from "@/lib/audit";
+import { UnauthorizedError, ForbiddenError } from "@/lib/auth-errors";
 import { ingestReplay } from "@/lib/ingest";
 import { MAX_UPLOAD_BYTES } from "@/lib/limits";
 import {
@@ -14,8 +17,9 @@ import {
   finishPendingUpload,
   getPendingUpload,
 } from "@/lib/pending-upload-store";
+import { matchesUploadActor } from "@/lib/upload-actor";
 import { RoflParseError } from "@/lib/rofl/parser";
-import { hasValidSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
 
 export const runtime = "nodejs";
 // Fetching + hashing a 10-30MB blob can take a few seconds.
@@ -102,11 +106,34 @@ async function finishPendingUploadQuietly(
   }
 }
 
+async function failUpload(
+  uploadId: string,
+  actor: Actor,
+  reason: string,
+): Promise<void> {
+  await finishPendingUploadQuietly(uploadId, "failed");
+  try {
+    await recordAudit(actor, {
+      action: "replay.processed",
+      targetType: "upload",
+      targetId: uploadId,
+      requestId: uploadId,
+      result: "failure",
+      after: { reason },
+    });
+  } catch {
+    console.error("Upload failure audit could not be recorded", { uploadId });
+  }
+}
+
 export async function POST(request: Request): Promise<NextResponse> {
   // Independent auth check (defense-in-depth beyond the proxy).
-  if (!(await hasValidSession())) {
+  const session = await getSession();
+  if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  if (session.role === "viewer")
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   let body: ProcessBody;
   try {
@@ -161,6 +188,8 @@ export async function POST(request: Request): Promise<NextResponse> {
       { status: rejection.status },
     );
   }
+  if (!matchesUploadActor(pending, session))
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   // The claim establishes this exact object. Drop query/fragment aliases at
   // the boundary so every later read, delete and persisted URL is canonical.
   const boundBlobUrl = `${store.origin}/${pending!.pathname}`;
@@ -196,7 +225,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!response.ok) {
       // The binding is consumed either way, so clear any blob left behind.
       await deleteBoundBlobQuietly(boundBlobUrl, store.token);
-      await finishPendingUploadQuietly(uploadId, "failed");
+      await failUpload(uploadId, session, "download_failed");
       return NextResponse.json(
         { error: "Could not download the uploaded file." },
         { status: 502 },
@@ -207,7 +236,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     );
     if (declaredLength > MAX_UPLOAD_BYTES) {
       await deleteBoundBlobQuietly(boundBlobUrl, store.token);
-      await finishPendingUploadQuietly(uploadId, "failed");
+      await failUpload(uploadId, session, "file_too_large");
       return NextResponse.json(
         { error: "File is too large." },
         { status: 413 },
@@ -216,7 +245,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     bytes = new Uint8Array(await response.arrayBuffer());
     if (bytes.byteLength > MAX_UPLOAD_BYTES) {
       await deleteBoundBlobQuietly(boundBlobUrl, store.token);
-      await finishPendingUploadQuietly(uploadId, "failed");
+      await failUpload(uploadId, session, "file_too_large");
       return NextResponse.json(
         { error: "File is too large." },
         { status: 413 },
@@ -224,7 +253,7 @@ export async function POST(request: Request): Promise<NextResponse> {
     }
   } catch {
     await deleteBoundBlobQuietly(boundBlobUrl, store.token);
-    await finishPendingUploadQuietly(uploadId, "failed");
+    await failUpload(uploadId, session, "download_failed");
     return NextResponse.json(
       { error: "Could not download the uploaded file." },
       { status: 502 },
@@ -238,13 +267,23 @@ export async function POST(request: Request): Promise<NextResponse> {
       blobUrl: boundBlobUrl,
       originalFilename,
       lastModified,
+      actor: session,
+      uploadId,
     });
   } catch (error) {
     if (error instanceof RoflParseError) {
       // A rejected replay cannot have committed a game, so cleanup is safe.
       await deleteBoundBlobQuietly(boundBlobUrl, store.token);
-      await finishPendingUploadQuietly(uploadId, "failed");
+      await failUpload(uploadId, session, "invalid_replay");
       return NextResponse.json({ error: error.message }, { status: 422 });
+    }
+    if (error instanceof UnauthorizedError || error instanceof ForbiddenError) {
+      await deleteBoundBlobQuietly(boundBlobUrl, store.token);
+      await failUpload(uploadId, session, "authority_revoked");
+      return NextResponse.json(
+        { error: "Administrator authority is no longer valid." },
+        { status: 403 },
+      );
     }
     // A dropped connection can hide a successful COMMIT. Preserve the file
     // for that game's canonical URL or later reconciliation; an exception
@@ -254,7 +293,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       { uploadId, blobUrl: boundBlobUrl },
       error,
     );
-    await finishPendingUploadQuietly(uploadId, "failed");
+    await failUpload(uploadId, session, "commit_outcome_unknown");
     return NextResponse.json(
       { error: "Failed to process the replay." },
       { status: 500 },

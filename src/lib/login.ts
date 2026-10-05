@@ -1,9 +1,12 @@
-import { authenticatePassword, type SessionRole } from "./auth";
+import type { Actor, SessionRole } from "./auth";
+import { authenticateAccessKey } from "./admin-credentials";
+import { recordAudit } from "./audit";
 import type { LoginThrottleLimits } from "./limits";
 import { checkLoginThrottle } from "./login-throttle";
+import { budgetKey, consumeRequestBudgets } from "./request-budget";
 
 export type LoginAttempt =
-  { ok: true; role: SessionRole } | { ok: false; error: string };
+  { ok: true; role: SessionRole; actor: Actor } | { ok: false; error: string };
 
 export const THROTTLED_MESSAGE =
   "시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.";
@@ -27,18 +30,43 @@ export async function attemptLogin(
   overrides: {
     limits?: LoginThrottleLimits;
     throttle?: typeof checkLoginThrottle;
-    verify?: typeof authenticatePassword;
+    verify?: typeof authenticateAccessKey;
     failedDelayMs?: number;
   } = {},
 ): Promise<LoginAttempt> {
   const throttle = overrides.throttle ?? checkLoginThrottle;
   if (!(await throttle(clientIp, overrides.limits))) {
+    // Record the incident once per trusted client/window instead of allowing
+    // rejected guesses to amplify append-only audit storage without a bound.
+    if (
+      await consumeRequestBudgets([
+        {
+          key: budgetKey("login:audit", clientIp ?? "untrusted"),
+          limit: 1,
+          windowMs: 60_000,
+        },
+      ])
+    ) {
+      await recordAudit(null, {
+        action: "auth.login",
+        targetType: "session",
+        result: "failure",
+        after: { reason: "throttled" },
+      });
+    }
     return { ok: false, error: THROTTLED_MESSAGE };
   }
 
-  const verify = overrides.verify ?? authenticatePassword;
-  const role = password ? verify(password) : null;
-  if (!role) {
+  const verify = overrides.verify ?? authenticateAccessKey;
+  const actor =
+    password && password.length <= 512 ? await verify(password) : null;
+  if (!actor) {
+    await recordAudit(null, {
+      action: "auth.login",
+      targetType: "session",
+      result: "failure",
+      after: { reason: "invalid_key" },
+    });
     const delayMs = overrides.failedDelayMs ?? FAILED_LOGIN_DELAY_MS;
     if (delayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -46,5 +74,6 @@ export async function attemptLogin(
     return { ok: false, error: WRONG_PASSWORD_MESSAGE };
   }
 
-  return { ok: true, role };
+  await recordAudit(actor, { action: "auth.login", targetType: "session" });
+  return { ok: true, role: actor.role, actor };
 }

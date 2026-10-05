@@ -1,17 +1,13 @@
 import Link from "next/link";
 
 import { riotId } from "@/lib/format";
-import { listMembersWithAccounts } from "@/lib/members";
-import { getSession } from "@/lib/session";
+import { getMembersReadModel } from "@/lib/read-model";
 
 export const dynamic = "force-dynamic";
 
 export default async function MembersPage() {
-  const [members, session] = await Promise.all([
-    listMembersWithAccounts(),
-    getSession(),
-  ]);
-  const isAdmin = session?.role === "admin";
+  const { members, role } = await getMembersReadModel();
+  const isAdmin = role !== "viewer";
 
   return (
     <section className="stack">
@@ -40,7 +36,7 @@ export default async function MembersPage() {
               <h2>
                 <Link href={`/members/${member.id}`}>
                   {member.name}
-                  {member.birthYear === null ? "" : `(${member.birthYear})`}
+                  {member.birthYear == null ? "" : `(${member.birthYear})`}
                 </Link>
               </h2>
               {member.accounts.length > 0 ? (

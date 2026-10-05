@@ -3,13 +3,22 @@ import "server-only";
 import { asc, desc, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import { gameParticipants, members, riotAccounts } from "@/db/schema";
+import {
+  adminCredentials,
+  gameParticipants,
+  members,
+  riotAccounts,
+} from "@/db/schema";
 
 export type MemberWithAccounts = {
   id: string;
   name: string;
   birthYear: number | null;
   accounts: { id: string; gameName: string; tagLine: string }[];
+};
+
+export type AdminMemberWithAccounts = MemberWithAccounts & {
+  administrator: boolean;
 };
 
 export type UnlinkedAccount = {
@@ -20,12 +29,15 @@ export type UnlinkedAccount = {
 };
 
 /** All members with their linked Riot accounts, ordered by name. */
-export async function listMembersWithAccounts(): Promise<MemberWithAccounts[]> {
+export async function listMembersWithAccounts(): Promise<
+  AdminMemberWithAccounts[]
+> {
   const rows = await db
     .select({
       id: members.id,
       name: members.name,
       birthYear: members.birthYear,
+      administrator: sql<boolean>`exists (select 1 from ${adminCredentials} where ${adminCredentials.memberId} = ${members.id} and ${adminCredentials.revokedAt} is null)`,
       accountId: riotAccounts.id,
       gameName: riotAccounts.gameName,
       tagLine: riotAccounts.tagLine,
@@ -34,7 +46,7 @@ export async function listMembersWithAccounts(): Promise<MemberWithAccounts[]> {
     .leftJoin(riotAccounts, eq(riotAccounts.memberId, members.id))
     .orderBy(asc(members.name));
 
-  const byMember = new Map<string, MemberWithAccounts>();
+  const byMember = new Map<string, AdminMemberWithAccounts>();
   for (const row of rows) {
     let member = byMember.get(row.id);
     if (!member) {
@@ -42,6 +54,7 @@ export async function listMembersWithAccounts(): Promise<MemberWithAccounts[]> {
         id: row.id,
         name: row.name,
         birthYear: row.birthYear,
+        administrator: row.administrator,
         accounts: [],
       };
       byMember.set(row.id, member);

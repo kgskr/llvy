@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
-vi.mock("@/lib/games", () => ({
+vi.mock("@/lib/game-mutations", () => ({
   setGameExcluded: mocks.setGameExcluded,
   setGamePlayedAt: mocks.setGamePlayedAt,
 }));

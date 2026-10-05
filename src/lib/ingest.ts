@@ -6,6 +6,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
+import type { Actor } from "@/lib/auth";
+import { appendAudit, lockActor, type DbTransaction } from "@/lib/audit";
 import { gameParticipants, games, riotAccounts } from "@/db/schema";
 import { assertWithinIngestBudget } from "@/lib/ingest-budget";
 import {
@@ -52,6 +54,9 @@ export async function ingestReplay(input: {
   blobUrl: string;
   originalFilename: string | null;
   lastModified: number | null;
+  /** HTTP callers always supply a verified actor; omitted only by internal fixture ingestion. */
+  actor?: Actor;
+  uploadId?: string;
 }): Promise<IngestResult> {
   const fileHash = sha256Hex(input.bytes);
 
@@ -61,6 +66,17 @@ export async function ingestReplay(input: {
     .where(eq(games.fileHash, fileHash))
     .limit(1);
   if (existing.length > 0) {
+    if (input.actor)
+      await db.transaction(async (tx) => {
+        await lockActor(tx, input.actor!);
+        await auditResult(
+          tx,
+          input.actor!,
+          input.uploadId,
+          existing[0].id,
+          true,
+        );
+      });
     return { gameId: existing[0].id, duplicate: true };
   }
 
@@ -79,8 +95,9 @@ export async function ingestReplay(input: {
     return left < right ? -1 : left > right ? 1 : 0;
   });
 
-  return retryRolledBackTransaction(() =>
+  const result = await retryRolledBackTransaction(() =>
     db.transaction(async (tx) => {
+      if (input.actor) await lockActor(tx, input.actor);
       const inserted = await tx
         .insert(games)
         .values({
@@ -107,6 +124,8 @@ export async function ingestReplay(input: {
           .from(games)
           .where(eq(games.fileHash, fileHash))
           .limit(1);
+        if (input.actor)
+          await auditResult(tx, input.actor, input.uploadId, row[0].id, true);
         return { gameId: row[0].id, duplicate: true };
       }
 
@@ -140,10 +159,30 @@ export async function ingestReplay(input: {
       }
 
       await tx.insert(gameParticipants).values(participantRows);
+      if (input.actor)
+        await auditResult(tx, input.actor, input.uploadId, gameId, false);
 
       return { gameId, duplicate: false };
     }),
   );
+  return result;
+}
+
+function auditResult(
+  tx: DbTransaction,
+  actor: Actor,
+  uploadId: string | undefined,
+  gameId: string,
+  duplicate: boolean,
+) {
+  return appendAudit(tx, actor, {
+    action: "replay.processed",
+    targetType: "upload",
+    targetId: uploadId ?? gameId,
+    requestId: uploadId,
+    result: duplicate ? "duplicate" : "success",
+    after: { gameId },
+  });
 }
 
 type Tx = Parameters<Parameters<typeof db.transaction>[0]>[0];

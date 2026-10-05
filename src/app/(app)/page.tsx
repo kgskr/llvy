@@ -1,21 +1,17 @@
 import Link from "next/link";
-
-export default function HomePage() {
+import { redirect } from "next/navigation";
+import { getSession } from "@/lib/session";
+export default async function HomePage() {
+  const session = await getSession();
+  if (!session) redirect("/login");
+  if (session.role !== "viewer") redirect("/games");
   return (
-    <section className="hero">
-      <p className="eyebrow">LLVY Replay Ingestion</p>
-      <h1>리그 내전 전적을 리플레이로 모읍니다.</h1>
-      <p className="summary">
-        .rofl 리플레이 파일을 업로드하면 게임 정보와 참가자 전적을 추출해
-        보관합니다.
-      </p>
+    <section className="stack">
+      <h1>LLVY</h1>
+      <p>함께한 게임과 모임원 전적을 확인하세요.</p>
       <div className="cta-row">
-        <Link href="/upload" className="button">
-          리플레이 업로드
-        </Link>
-        <Link href="/games" className="button button-secondary">
-          게임 보기
-        </Link>
+        <Link href="/games">게임</Link>
+        <Link href="/members">모임원</Link>
       </div>
     </section>
   );

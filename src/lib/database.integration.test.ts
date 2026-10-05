@@ -79,7 +79,7 @@ describe("stored migrations and replay ingestion", () => {
     const journal = await client.query<{ count: number }>(
       'SELECT count(*)::int AS count FROM drizzle."__drizzle_migrations"',
     );
-    expect(journal.rows[0].count).toBe(4);
+    expect(journal.rows[0].count).toBe(5);
   });
 
   it.each(["legacy", "rofl2"] as const)(
@@ -441,6 +441,7 @@ describe("member identities and retroactive account links", () => {
         id: memberId,
         name: "새 이름",
         birthYear: null,
+        administrator: false,
         accounts: [{ id: account.id, gameName: "Player1", tagLine: "KR1" }],
       },
     ]);
@@ -642,7 +643,13 @@ describe("member identities and retroactive account links", () => {
   it("includes members without accounts and reports missing mutation targets", async () => {
     const memberId = await createMember("아직 계정 없음", null);
     expect(await listMembersWithAccounts()).toEqual([
-      { id: memberId, name: "아직 계정 없음", birthYear: null, accounts: [] },
+      {
+        id: memberId,
+        name: "아직 계정 없음",
+        birthYear: null,
+        administrator: false,
+        accounts: [],
+      },
     ]);
     expect(await updateMember(randomUUID(), "없음", null)).toBe(false);
     expect(await linkAccount(randomUUID(), memberId)).toBe(false);

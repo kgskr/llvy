@@ -20,7 +20,7 @@ const NoticeContext = createContext<((state: AdminActionState) => void) | null>(
   null,
 );
 
-/** Keep feedback visible when linking moves an account to another table. */
+/** Keep feedback visible when an account or deleted member leaves the table. */
 export function AdminFeedbackProvider({
   children,
 }: {
@@ -120,7 +120,7 @@ export function LinkAccountForm({
 }: {
   accountId: string;
   accountName: string;
-  members: { id: string; name: string; birthYear: number | null }[];
+  members: { id: string; name: string }[];
 }) {
   const notify = useContext(NoticeContext);
   const [state, formAction, pending] = useActionState<
@@ -148,7 +148,6 @@ export function LinkAccountForm({
         {members.map((member) => (
           <option key={member.id} value={member.id}>
             {member.name}
-            {member.birthYear ? ` (${member.birthYear})` : ""}
           </option>
         ))}
       </select>

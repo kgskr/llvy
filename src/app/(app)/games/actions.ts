@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 
 import { validateGameDateInput } from "@/lib/game-date";
-import { setGameExcluded, setGamePlayedAt } from "@/lib/games";
+import { setGameExcluded, setGamePlayedAt } from "@/lib/game-mutations";
 import { assertAdmin, ForbiddenError, UnauthorizedError } from "@/lib/session";
 import { isUuid } from "@/lib/validation";
 

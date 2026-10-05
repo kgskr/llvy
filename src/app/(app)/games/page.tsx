@@ -1,10 +1,8 @@
 import Link from "next/link";
 
-import { countGames, listGames } from "@/lib/games";
+import { getGameListReadModel } from "@/lib/read-model";
 import { formatDate, formatDuration, teamLabel } from "@/lib/format";
 import { playedAtSourceLabel } from "@/lib/game-date";
-import { parsePageNumber } from "@/lib/validation";
-import { getSession } from "@/lib/session";
 
 import { GameFeedbackProvider, GameVisibilityForm } from "./forms";
 
@@ -20,14 +18,13 @@ export default async function GamesPage({
   const { page: requestedPage, view } = await searchParams;
   const visibility = view === "excluded" ? "excluded" : "active";
   const excluded = visibility === "excluded";
-  const [total, session] = await Promise.all([
-    countGames(visibility),
-    getSession(),
-  ]);
-  const canRestore = excluded && session?.role === "admin";
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const page = Math.min(parsePageNumber(requestedPage), pageCount);
-  const games = await listGames(PAGE_SIZE, (page - 1) * PAGE_SIZE, visibility);
+  const { total, role, pageCount, page, games } = await getGameListReadModel(
+    PAGE_SIZE,
+    requestedPage,
+    visibility,
+  );
+  const isAdmin = role !== "viewer";
+  const canRestore = excluded && isAdmin;
   const viewQuery = excluded ? "view=excluded&" : "";
 
   return (
@@ -62,7 +59,7 @@ export default async function GamesPage({
         {games.length === 0 ? (
           <p className="empty-state">
             {excluded ? "제외된 경기가 없습니다." : "표시할 경기가 없습니다."}
-            {!excluded ? (
+            {!excluded && isAdmin ? (
               <>
                 {" "}
                 <Link href="/upload">리플레이 업로드 →</Link>
@@ -95,6 +92,7 @@ export default async function GamesPage({
                     <td>{formatDuration(game.durationMs)}</td>
                     <td>{teamLabel(game.winningTeam)}</td>
                     <td>{game.participantCount}</td>
+
                     <td>
                       <Link
                         href={`/games/${game.id}?view=${visibility}&page=${page}`}

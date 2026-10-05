@@ -7,7 +7,7 @@ import {
   linkAccount,
   unlinkAccount,
   updateMember,
-} from "@/lib/members";
+} from "@/lib/member-mutations";
 import { assertAdmin, ForbiddenError, UnauthorizedError } from "@/lib/session";
 import { isUuid, validateMemberInput } from "@/lib/validation";
 
@@ -30,6 +30,7 @@ async function runAdminAction(
         message: "로그인이 만료되었습니다. 다시 로그인하세요.",
       };
     }
+
     console.error("Member administration failed", error);
     return {
       status: "error",

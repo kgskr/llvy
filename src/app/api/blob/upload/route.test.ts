@@ -1,16 +1,17 @@
+import { ownerSession, ownerUploadFields } from "@/test/actor";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@vercel/blob/client", () => ({ handleUpload: vi.fn() }));
 vi.mock("@/lib/pending-upload-store", () => ({ getPendingUpload: vi.fn() }));
-vi.mock("@/lib/session", () => ({ hasValidSession: vi.fn() }));
+vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
 
 import { handleUpload, type HandleUploadOptions } from "@vercel/blob/client";
 
 import { MAX_UPLOAD_BYTES } from "@/lib/limits";
 import { hashNonce } from "@/lib/pending-upload";
 import { getPendingUpload } from "@/lib/pending-upload-store";
-import { hasValidSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
 
 import { POST } from "./route";
 
@@ -21,6 +22,7 @@ const expiresAt = new Date(Date.now() + 30 * 60_000);
 const pending = {
   id: uploadId,
   nonceHash: hashNonce(nonce),
+  ...ownerUploadFields,
   pathname,
   state: "pending",
   blobUrl: null,
@@ -55,7 +57,7 @@ describe("POST /api/blob/upload", () => {
     vi.resetAllMocks();
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_test_secret");
     issuedConstraints = undefined;
-    vi.mocked(hasValidSession).mockResolvedValue(true);
+    vi.mocked(getSession).mockResolvedValue(ownerSession);
     vi.mocked(getPendingUpload).mockResolvedValue(pending);
     vi.mocked(handleUpload).mockImplementation(async (options) => {
       if (options.body.type !== "blob.generate-client-token") {
@@ -91,7 +93,7 @@ describe("POST /api/blob/upload", () => {
   });
 
   it("rejects an unauthenticated fresh-token request", async () => {
-    vi.mocked(hasValidSession).mockResolvedValue(false);
+    vi.mocked(getSession).mockResolvedValue(null);
 
     const response = await POST(request());
 
@@ -161,5 +163,33 @@ describe("POST /api/blob/upload", () => {
 
     expect(response.status).toBe(400);
     expect(handleUpload).not.toHaveBeenCalled();
+  });
+
+  it("rejects viewer token generation before the Blob SDK", async () => {
+    vi.mocked(getSession).mockResolvedValue({
+      ...ownerSession,
+      role: "viewer",
+    });
+    expect((await POST(request())).status).toBe(403);
+    expect(handleUpload).not.toHaveBeenCalled();
+  });
+
+  it("refuses tokens for another identity's reserved upload", async () => {
+    vi.mocked(getSession).mockResolvedValue({
+      ...ownerSession,
+      role: "admin",
+      memberId: crypto.randomUUID(),
+      credentialId: crypto.randomUUID(),
+    });
+    expect((await POST(request())).status).toBe(400);
+    expect(issuedConstraints).toBeUndefined();
+  });
+
+  it("checks live authority again before minting the token", async () => {
+    vi.mocked(getSession)
+      .mockResolvedValueOnce(ownerSession)
+      .mockResolvedValue(null);
+    expect((await POST(request())).status).toBe(400);
+    expect(issuedConstraints).toBeUndefined();
   });
 });

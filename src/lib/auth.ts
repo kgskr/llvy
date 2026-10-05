@@ -1,18 +1,24 @@
 /**
- * Shared-key role auth using Web Crypto, shared by Proxy and server actions.
- * AUTH_SECRET is always server-only and independent of both login keys.
- * Each role's signing key is bound to its current login key for session revocation.
+ * Three-role session signatures using Web Crypto, shared by Proxy and Actions.
+ * Shared-role key rotation revokes its sessions; admin revocation is checked
+ * against the credential database in the server data-access layer.
  */
 
 export const SESSION_COOKIE = "llvy_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 const encoder = new TextEncoder();
-const HKDF_SALT = "llvy-session-hkdf-v3";
+const HKDF_SALT = "llvy-session-hkdf-v4";
 const HKDF_INFO = "llvy-session-hmac";
 
-export type SessionRole = "uploader" | "admin";
-export type VerifiedSession = { role: SessionRole; issuedAt: number };
+export type SessionRole = "viewer" | "admin" | "owner";
+export type SessionIdentity = {
+  role: SessionRole;
+  memberId: string | null;
+  credentialId: string | null;
+};
+export type VerifiedSession = SessionIdentity & { issuedAt: number };
+export type Actor = SessionIdentity & { name: string };
 
 export class AuthConfigurationError extends Error {
   constructor() {
@@ -22,24 +28,24 @@ export class AuthConfigurationError extends Error {
 }
 
 function getAuthConfig() {
-  const uploader = process.env.UPLOAD_PASSWORD;
-  const admin = process.env.ADMIN_PASSWORD;
+  const viewer = process.env.READ_PASSWORD;
+  const owner = process.env.OWNER_PASSWORD;
   const secret = process.env.AUTH_SECRET?.trim();
   if (
-    !uploader?.trim() ||
-    !admin?.trim() ||
-    uploader === admin ||
+    !viewer?.trim() ||
+    !owner?.trim() ||
+    viewer === owner ||
     !secret ||
     encoder.encode(secret).length < 32 ||
-    secret === uploader ||
-    secret === admin
+    secret === viewer ||
+    secret === owner
   ) {
     throw new AuthConfigurationError();
   }
-  return { secret, passwords: { uploader, admin } };
+  return { secret, passwords: { viewer, owner, admin: "" } };
 }
 
-// At most two entries, so rotations do not retain an unbounded set of secrets.
+// At most three entries, so rotations do not retain an unbounded secret history.
 const signingKeyCache = new Map<
   SessionRole,
   { secret: string; password: string; key: Promise<CryptoKey> }
@@ -111,20 +117,31 @@ function timingSafeEqual(a: string, b: string): boolean {
 }
 
 /** The server selects the role; caller-supplied roles never participate. */
-export function authenticatePassword(input: string): SessionRole | null {
+export function authenticatePassword(input: string): "viewer" | "owner" | null {
   const { passwords } = getAuthConfig();
-  const uploader = timingSafeEqual(input, passwords.uploader);
-  const admin = timingSafeEqual(input, passwords.admin);
-  if (admin) return "admin";
-  return uploader ? "uploader" : null;
+  const viewer = timingSafeEqual(input, passwords.viewer);
+  const owner = timingSafeEqual(input, passwords.owner);
+  if (owner) return "owner";
+  return viewer ? "viewer" : null;
 }
 
 /** Create a signed session token to store in the session cookie. */
-export async function createSessionToken(role: SessionRole): Promise<string> {
-  if (role !== "uploader" && role !== "admin") {
+export async function createSessionToken(
+  identity: SessionIdentity | "viewer" | "owner",
+): Promise<string> {
+  const { role, memberId, credentialId } =
+    typeof identity === "string"
+      ? { role: identity, memberId: null, credentialId: null }
+      : identity;
+  if (
+    (role !== "viewer" && role !== "admin" && role !== "owner") ||
+    (role === "admin"
+      ? !isSessionUuid(memberId) || !isSessionUuid(credentialId)
+      : memberId !== null || credentialId !== null)
+  ) {
     throw new Error("Invalid session role");
   }
-  const payload = `v3.${role}.${Date.now()}.${crypto.randomUUID()}`;
+  const payload = `v4.${role}.${Date.now()}.${crypto.randomUUID()}.${memberId ?? "-"}.${credentialId ?? "-"}`;
   const key = await getSigningKey(role);
   const signature = await crypto.subtle.sign(
     "HMAC",
@@ -140,11 +157,22 @@ export async function readSessionToken(
 ): Promise<VerifiedSession | null> {
   if (!token || token.length > 256) return null;
   const parts = token.split(".");
-  if (parts.length !== 5) return null;
-  const [version, role, timestamp, nonce, signaturePart] = parts;
+  if (parts.length !== 7) return null;
+  const [
+    version,
+    role,
+    timestamp,
+    nonce,
+    memberPart,
+    credentialPart,
+    signaturePart,
+  ] = parts;
   if (
-    version !== "v3" ||
-    (role !== "uploader" && role !== "admin") ||
+    version !== "v4" ||
+    (role !== "viewer" && role !== "admin" && role !== "owner") ||
+    (role === "admin"
+      ? !isSessionUuid(memberPart) || !isSessionUuid(credentialPart)
+      : memberPart !== "-" || credentialPart !== "-") ||
     !/^\d{1,16}$/.test(timestamp) ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
       nonce,
@@ -173,9 +201,16 @@ export async function readSessionToken(
       "HMAC",
       key,
       signature,
-      encoder.encode(parts.slice(0, 4).join(".")),
+      encoder.encode(parts.slice(0, 6).join(".")),
     );
-    return valid ? { role, issuedAt } : null;
+    return valid
+      ? {
+          role,
+          issuedAt,
+          memberId: role === "admin" ? memberPart : null,
+          credentialId: role === "admin" ? credentialPart : null,
+        }
+      : null;
   } catch (error) {
     if (error instanceof AuthConfigurationError) return null;
     throw error;
@@ -191,4 +226,17 @@ export async function verifySessionToken(
 
 export function isAdminPath(pathname: string): boolean {
   return pathname === "/admin" || pathname.startsWith("/admin/");
+}
+
+export function isOwnerPath(pathname: string): boolean {
+  return pathname === "/admin/audit" || pathname.startsWith("/admin/audit/");
+}
+
+export function isSessionUuid(value: string | null): value is string {
+  return (
+    typeof value === "string" &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      value,
+    )
+  );
 }

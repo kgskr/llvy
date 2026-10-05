@@ -9,7 +9,10 @@ import {
   SESSION_MAX_AGE_SECONDS,
   createSessionToken,
   isAdminPath,
+  isOwnerPath,
 } from "@/lib/auth";
+import { recordAudit } from "@/lib/audit";
+import { getSession } from "@/lib/session";
 import { attemptLogin } from "@/lib/login";
 import { sanitizeRedirect } from "@/lib/redirect";
 import { trustedClientIp } from "@/lib/trusted-client-ip";
@@ -38,12 +41,18 @@ export async function login(
   try {
     const attempt = await attemptLogin(password, await clientIp());
     if (!attempt.ok) return { error: attempt.error };
-    token = await createSessionToken(attempt.role);
+    token = await createSessionToken(attempt.actor);
+    const pathname = new URL(redirectTo, "https://llvy.invalid").pathname;
     if (
-      attempt.role === "uploader" &&
-      isAdminPath(new URL(redirectTo, "https://llvy.invalid").pathname)
+      attempt.role === "viewer" &&
+      (isAdminPath(pathname) || pathname === "/upload")
     ) {
-      destination = "/members";
+      destination = "/";
+    } else if (
+      (attempt.role !== "owner" && isOwnerPath(pathname)) ||
+      (attempt.role !== "viewer" && pathname === "/")
+    ) {
+      destination = "/games";
     }
   } catch (error) {
     if (!(error instanceof AuthConfigurationError)) throw error;
@@ -65,7 +74,24 @@ export async function login(
 }
 
 export async function logout(): Promise<void> {
+  // Local sign-out must remain possible even if live credential lookup fails.
+  let session: Awaited<ReturnType<typeof getSession>> = null;
+  try {
+    session = await getSession();
+  } catch {
+    console.error("Logout credential lookup failed");
+  }
   const cookieStore = await cookies();
   cookieStore.delete(SESSION_COOKIE);
+  if (session) {
+    try {
+      await recordAudit(session, {
+        action: "auth.logout",
+        targetType: "session",
+      });
+    } catch {
+      console.error("Logout audit could not be recorded");
+    }
+  }
   redirect("/login");
 }

@@ -4,7 +4,9 @@ import { del, list } from "@vercel/blob";
 import { and, eq, lt, ne, or } from "drizzle-orm";
 
 import { db } from "@/db";
-import { games, pendingUploads, requestBudgets } from "@/db/schema";
+import { auditLogs, games, pendingUploads, requestBudgets } from "@/db/schema";
+import { appendAudit } from "@/lib/audit";
+import type { Actor } from "@/lib/auth";
 import { getBlobStoreConfig } from "@/lib/blob-store";
 
 const EXPIRY_GRACE_MS = 24 * 60 * 60 * 1000;
@@ -79,16 +81,71 @@ export async function reconcileExpiredUploads(): Promise<{
           await del(exact.url, { token: store.token });
         }
       }
-      await db
-        .delete(pendingUploads)
-        .where(
-          and(
-            eq(pendingUploads.id, row.id),
-            eq(pendingUploads.state, "cleaning"),
-            eq(pendingUploads.cleanupClaimedAt, claimAt),
-          ),
+      const finalized = await db.transaction(async (tx) => {
+        const claim = and(
+          eq(pendingUploads.id, row.id),
+          eq(pendingUploads.state, "cleaning"),
+          eq(pendingUploads.cleanupClaimedAt, claimAt),
         );
-      removed += 1;
+        const [claimedRow] = await tx
+          .select()
+          .from(pendingUploads)
+          .where(claim)
+          .for("update");
+        if (!claimedRow) return false;
+
+        const [terminal] = await tx
+          .select({ id: auditLogs.id })
+          .from(auditLogs)
+          .where(
+            and(
+              eq(auditLogs.action, "replay.processed"),
+              eq(auditLogs.requestId, row.id),
+            ),
+          )
+          .limit(1);
+        if (!terminal) {
+          const [game] = await tx
+            .select({ id: games.id })
+            .from(games)
+            .where(eq(games.blobUrl, canonicalUrl))
+            .limit(1);
+          const role = claimedRow.actorRole;
+          const actor: Actor | null =
+            role === "admin" || role === "owner" || role === "viewer"
+              ? {
+                  role,
+                  memberId: claimedRow.actorMemberId,
+                  credentialId: claimedRow.actorCredentialId,
+                  name:
+                    claimedRow.actorName ??
+                    (role === "owner"
+                      ? "서비스 오너"
+                      : role === "admin"
+                        ? "관리자"
+                        : "일반 사용자"),
+                }
+              : null;
+          // Maintenance records the reservation's historical initiator; a
+          // subsequently revoked credential must not prevent reconciliation.
+          await appendAudit(tx, actor, {
+            action: "replay.processed",
+            targetType: "upload",
+            targetId: row.id,
+            requestId: row.id,
+            result: game ? "success" : "failure",
+            after: game
+              ? { gameId: game.id, reason: "reconciled_commit" }
+              : { reason: "upload_expired" },
+          });
+        }
+        const deleted = await tx
+          .delete(pendingUploads)
+          .where(claim)
+          .returning({ id: pendingUploads.id });
+        return deleted.length > 0;
+      });
+      if (finalized) removed += 1;
     } catch (error) {
       failed += 1;
       console.error("Failed to reconcile expired upload:", row.id, error);

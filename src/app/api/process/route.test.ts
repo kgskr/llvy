@@ -1,3 +1,7 @@
+vi.mock("@/lib/audit", () => ({ recordAudit: vi.fn(async () => {}) }));
+import { ownerSession, ownerUploadFields } from "@/test/actor";
+import { UnauthorizedError } from "@/lib/auth-errors";
+import { recordAudit } from "@/lib/audit";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -8,7 +12,7 @@ vi.mock("@/lib/pending-upload-store", () => ({
   finishPendingUpload: vi.fn(),
   getPendingUpload: vi.fn(),
 }));
-vi.mock("@/lib/session", () => ({ hasValidSession: vi.fn() }));
+vi.mock("@/lib/session", () => ({ getSession: vi.fn() }));
 
 import { del } from "@vercel/blob";
 
@@ -21,7 +25,7 @@ import {
   getPendingUpload,
 } from "@/lib/pending-upload-store";
 import { parseRofl, RoflParseError } from "@/lib/rofl/parser";
-import { hasValidSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
 import { replayBytes, replayPlayer } from "@/test/replay";
 
 import { POST } from "./route";
@@ -53,10 +57,11 @@ describe("POST /api/process", () => {
     vi.resetAllMocks();
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", blobToken);
     vi.stubEnv("BLOB_ACCESS", "public");
-    vi.mocked(hasValidSession).mockResolvedValue(true);
+    vi.mocked(getSession).mockResolvedValue(ownerSession);
     vi.mocked(getPendingUpload).mockResolvedValue({
       id: uploadId,
       nonceHash: hashNonce(nonce),
+      ...ownerUploadFields,
       pathname,
       state: "pending",
       blobUrl: null,
@@ -202,6 +207,8 @@ describe("POST /api/process", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual(result);
     expect(ingestReplay).toHaveBeenCalledWith({
+      actor: ownerSession,
+      uploadId,
       bytes: new TextEncoder().encode("replay"),
       blobUrl,
       originalFilename: payload.originalFilename,
@@ -412,13 +419,51 @@ describe("POST /api/process", () => {
   });
 
   it("rejects unauthenticated processing before reading storage", async () => {
-    vi.mocked(hasValidSession).mockResolvedValue(false);
+    vi.mocked(getSession).mockResolvedValue(null);
 
     const response = await POST(request());
 
     expect(response.status).toBe(401);
     expect(getPendingUpload).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("rejects viewer processing before reading any binding or blob", async () => {
+    vi.mocked(getSession).mockResolvedValue({
+      ...ownerSession,
+      role: "viewer",
+    });
+    expect((await POST(request())).status).toBe(403);
+    expect(getPendingUpload).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(ingestReplay).not.toHaveBeenCalled();
+  });
+
+  it("rejects another administrator's binding before claim/fetch/delete", async () => {
+    vi.mocked(getSession).mockResolvedValue({
+      ...ownerSession,
+      role: "admin",
+      memberId: crypto.randomUUID(),
+      credentialId: crypto.randomUUID(),
+    });
+    expect((await POST(request())).status).toBe(403);
+    expect(claimPendingUpload).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it("rejects authority revoked during download and records the failure", async () => {
+    vi.mocked(ingestReplay).mockRejectedValue(new UnauthorizedError());
+    expect((await POST(request())).status).toBe(403);
+    expect(del).toHaveBeenCalled();
+    expect(recordAudit).toHaveBeenCalledWith(
+      ownerSession,
+      expect.objectContaining({
+        result: "failure",
+        requestId: uploadId,
+        after: { reason: "authority_revoked" },
+      }),
+    );
   });
 
   it.each([null, [], "invalid", 42])(

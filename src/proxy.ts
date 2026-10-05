@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { SESSION_COOKIE, isAdminPath, readSessionToken } from "@/lib/auth";
+import {
+  SESSION_COOKIE,
+  isAdminPath,
+  isOwnerPath,
+  readSessionToken,
+} from "@/lib/auth";
 
 export async function proxy(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
@@ -8,7 +13,11 @@ export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
   if (session) {
-    if (session.role !== "admin" && isAdminPath(pathname)) {
+    if (
+      (session.role === "viewer" &&
+        (isAdminPath(pathname) || pathname === "/upload")) ||
+      (session.role !== "owner" && isOwnerPath(pathname))
+    ) {
       return NextResponse.redirect(new URL("/members", request.url));
     }
     return NextResponse.next();

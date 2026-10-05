@@ -15,6 +15,9 @@ const mocks = vi.hoisted(() => ({
   unlinkAccount: vi.fn(),
   listMembers: vi.fn(),
   listUnlinked: vi.fn(),
+  countMembers: vi.fn(),
+  countUnlinkedAccounts: vi.fn(),
+  listMemberOptions: vi.fn(),
   getMemberHistory: vi.fn(),
   setGameExcluded: vi.fn(),
   setGamePlayedAt: vi.fn(),
@@ -22,6 +25,9 @@ const mocks = vi.hoisted(() => ({
   countGames: vi.fn(),
   listGames: vi.fn(),
   createPendingUpload: vi.fn(),
+  recordAudit: vi.fn(),
+  listAuditLogs: vi.fn(),
+  adminActive: true,
 }));
 
 vi.mock("server-only", () => ({}));
@@ -45,17 +51,24 @@ vi.mock("next/navigation", () => ({
   },
 }));
 vi.mock("@/lib/login-throttle", () => ({ checkLoginThrottle: mocks.throttle }));
-vi.mock("@/lib/members", () => ({
+vi.mock("@/lib/member-mutations", () => ({
   createMember: mocks.createMember,
   updateMember: mocks.updateMember,
   linkAccount: mocks.linkAccount,
   unlinkAccount: mocks.unlinkAccount,
+}));
+vi.mock("@/lib/members", () => ({
   listMembersWithAccounts: mocks.listMembers,
   listUnlinkedAccounts: mocks.listUnlinked,
+  countMembers: mocks.countMembers,
+  countUnlinkedAccounts: mocks.countUnlinkedAccounts,
+  listMemberOptions: mocks.listMemberOptions,
 }));
-vi.mock("@/lib/games", () => ({
+vi.mock("@/lib/game-mutations", () => ({
   setGameExcluded: mocks.setGameExcluded,
   setGamePlayedAt: mocks.setGamePlayedAt,
+}));
+vi.mock("@/lib/games", () => ({
   getGameDetail: mocks.getGameDetail,
   countGames: mocks.countGames,
   listGames: mocks.listGames,
@@ -67,6 +80,38 @@ vi.mock("@/lib/pending-upload-store", () => ({
   createPendingUpload: mocks.createPendingUpload,
   UploadBudgetExceeded: class extends Error {},
 }));
+vi.mock("@/lib/admin-credentials", async () => {
+  const { authenticatePassword } = await import("./auth");
+  return {
+    findActiveAdmin: async (credentialId: string, memberId: string) =>
+      mocks.adminActive &&
+      credentialId === ADMIN_ACTOR.credentialId &&
+      memberId === ADMIN_ACTOR.memberId
+        ? ADMIN_ACTOR
+        : null,
+    authenticateAccessKey: async (key: string) => {
+      const role = authenticatePassword(key);
+      if (role)
+        return {
+          role,
+          memberId: null,
+          credentialId: null,
+          name: role === "owner" ? "서비스 오너" : "일반 사용자",
+        };
+      return key === ADMIN_KEY && mocks.adminActive ? ADMIN_ACTOR : null;
+    },
+    listAdminAssignments: async () => [],
+  };
+});
+vi.mock("@/lib/audit", () => ({
+  recordAudit: mocks.recordAudit,
+  listAuditLogs: mocks.listAuditLogs,
+}));
+vi.mock("@/app/(app)/admin/credential-controls", () => ({
+  CredentialControls: () => (
+    <button data-management="credential">관리자 지정</button>
+  ),
+}));
 vi.mock("@/lib/champions", () => ({
   resolveChampionNames: async () => new Map(),
 }));
@@ -74,6 +119,7 @@ vi.mock("@/app/(app)/games/forms", () => ({
   GameFeedbackProvider: ({ children }: { children: React.ReactNode }) =>
     children,
   GameDateForm: () => <form data-management="date" />,
+  GameCommentForm: () => <form data-management="comment" />,
   GameVisibilityForm: ({ excluded }: { excluded: boolean }) => (
     <form data-management={excluded ? "restore" : "exclude"} />
   ),
@@ -82,6 +128,9 @@ vi.mock("@/app/(app)/admin/forms", () => ({
   AdminFeedbackProvider: ({ children }: { children: React.ReactNode }) =>
     children,
   MemberForm: () => <form data-management="member" />,
+  DeleteMemberForm: () => <form data-management="delete-member" />,
+  LinkAccountForm: () => <form data-management="link-account" />,
+  UnlinkAccountForm: () => <form data-management="unlink-account" />,
 }));
 
 import {
@@ -118,8 +167,18 @@ import GameDetailPage from "@/app/(app)/games/[id]/page";
 import MembersPage from "@/app/(app)/members/page";
 import MemberHistoryPage from "@/app/(app)/members/[id]/page";
 
-const UPLOADER_KEY = "test-uploader-key";
+const VIEWER_KEY = "test-viewer-key";
 const ADMIN_KEY = "test-administrator-key";
+const OWNER_KEY = "test-private-owner-key";
+const ADMIN_ACTOR = {
+  role: "admin" as const,
+  memberId: "11111111-1111-4111-8111-111111111111",
+  credentialId: "22222222-2222-4222-8222-222222222222",
+  name: "김관리",
+};
+function sessionToken(role: "viewer" | "admin" | "owner") {
+  return createSessionToken(role === "admin" ? ADMIN_ACTOR : role);
+}
 const GAME_ID = randomUUID();
 const MUTATIONS = [
   createMemberAction,
@@ -155,7 +214,9 @@ function mutationForm() {
     gameId: GAME_ID,
     excluded: "true",
     playedAt: "2026-10-02T21:00",
+    comment: "  권한 테스트  ",
     role: "admin",
+    confirmed: "yes",
   });
 }
 
@@ -166,6 +227,7 @@ const GAME = {
   originalPlayedAt: new Date("2026-10-02T12:00:00Z"),
   originalPlayedAtSource: "file_mtime",
   playedAtOverride: null,
+  comment: "공유 코멘트",
   durationMs: 1200000,
   gameVersion: "16.19",
   winningTeam: 100,
@@ -177,18 +239,24 @@ const GAME = {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.token = undefined;
+  mocks.adminActive = true;
   vi.stubEnv("NODE_ENV", "development");
   vi.stubEnv("VERCEL", undefined);
-  vi.stubEnv("UPLOAD_PASSWORD", UPLOADER_KEY);
-  vi.stubEnv("ADMIN_PASSWORD", ADMIN_KEY);
+  vi.stubEnv("READ_PASSWORD", VIEWER_KEY);
+  vi.stubEnv("OWNER_PASSWORD", OWNER_KEY);
   vi.stubEnv("AUTH_SECRET", "independent-server-secret-at-least-32-bytes");
   vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_test_secret");
   vi.stubEnv("BLOB_ACCESS", "private");
   mocks.throttle.mockResolvedValue(true);
+  mocks.recordAudit.mockResolvedValue(undefined);
+  mocks.listAuditLogs.mockResolvedValue([]);
   mocks.createMember.mockResolvedValue(randomUUID());
   for (const write of WRITES.slice(1, -1)) write.mockResolvedValue(true);
   mocks.listMembers.mockResolvedValue([]);
   mocks.listUnlinked.mockResolvedValue([]);
+  mocks.countMembers.mockResolvedValue(0);
+  mocks.countUnlinkedAccounts.mockResolvedValue(0);
+  mocks.listMemberOptions.mockResolvedValue([]);
   mocks.getGameDetail.mockResolvedValue(GAME);
   mocks.countGames.mockResolvedValue(1);
   mocks.listGames.mockResolvedValue([GAME]);
@@ -202,8 +270,8 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("actual session authorization at mutation entry points", () => {
-  it("blocks uploader direct calls to every management action before any write", async () => {
-    mocks.token = await createSessionToken("uploader");
+  it("blocks viewer direct calls to every management action before any write", async () => {
+    mocks.token = await sessionToken("viewer");
     await expect(assertAdmin()).rejects.toBeInstanceOf(ForbiddenError);
     for (const action of MUTATIONS) {
       expect(await action(null, mutationForm())).toEqual({
@@ -214,17 +282,54 @@ describe("actual session authorization at mutation entry points", () => {
     for (const write of WRITES) expect(write).not.toHaveBeenCalled();
   });
 
+  it("rejects viewer upload reservations independently of Proxy", async () => {
+    mocks.token = await sessionToken("viewer");
+    const response = await reserveUpload(
+      new Request("http://localhost/api/uploads", {
+        method: "POST",
+        body: JSON.stringify({ filename: "match.rofl", role: "owner" }),
+      }),
+    );
+    expect(response.status).toBe(403);
+    expect(mocks.createPendingUpload).not.toHaveBeenCalled();
+  });
+
+  it("denies revoked administrators before any privileged read or mutation", async () => {
+    mocks.token = await sessionToken("admin");
+    mocks.adminActive = false;
+    expect(await hasValidSession()).toBe(false);
+    expect(await getValidSessionToken()).toBeNull();
+    await expect(assertAdmin()).rejects.toBeInstanceOf(UnauthorizedError);
+    for (const action of MUTATIONS) {
+      expect((await action(null, mutationForm()))?.status).toBe("error");
+    }
+    await expect(AdminPage()).rejects.toThrow(
+      "redirect:/login?redirectTo=%2Fadmin",
+    );
+    expect(mocks.listMembers).not.toHaveBeenCalled();
+    expect(mocks.listUnlinked).not.toHaveBeenCalled();
+    for (const write of WRITES) expect(write).not.toHaveBeenCalled();
+    const response = await reserveUpload(
+      new Request("http://localhost/api/uploads", {
+        method: "POST",
+        body: JSON.stringify({ filename: "match.rofl" }),
+      }),
+    );
+    expect(response.status).toBe(401);
+    expect(mocks.createPendingUpload).not.toHaveBeenCalled();
+  });
+
   it.each(["missing", "tampered", "legacy", "expired"])(
     "blocks all management writes for %s sessions",
     async (kind) => {
-      const token = await createSessionToken("uploader");
+      const token = await sessionToken("viewer");
       mocks.token =
         kind === "missing"
           ? undefined
           : kind === "tampered"
-            ? token.replace(".uploader.", ".admin.")
+            ? token.replace(".viewer.", ".admin.")
             : kind === "legacy"
-              ? token.replace("v3.uploader", "v2")
+              ? token.replace("v4.viewer", "v3.viewer")
               : token;
       const clock =
         kind === "expired"
@@ -249,17 +354,17 @@ describe("actual session authorization at mutation entry points", () => {
   );
 
   it("allows every valid administrator mutation", async () => {
-    mocks.token = await createSessionToken("admin");
+    mocks.token = await sessionToken("admin");
     for (const action of MUTATIONS) {
       expect((await action(null, mutationForm()))?.status).toBe("success");
     }
     for (const write of WRITES) expect(write).toHaveBeenCalled();
   });
 
-  it.each(["uploader", "admin"] as const)(
+  it.each(["admin", "owner"] as const)(
     "preserves %s upload access and its original budget identity",
     async (role) => {
-      mocks.token = await createSessionToken(role);
+      mocks.token = await sessionToken(role);
       expect(await hasValidSession()).toBe(true);
       expect(await getValidSessionToken()).toBe(mocks.token);
       const response = await reserveUpload(
@@ -271,6 +376,7 @@ describe("actual session authorization at mutation entry points", () => {
       expect(response.status).toBe(200);
       expect(mocks.createPendingUpload).toHaveBeenCalledExactlyOnceWith(
         mocks.token,
+        expect.objectContaining({ role }),
       );
     },
   );
@@ -278,11 +384,16 @@ describe("actual session authorization at mutation entry points", () => {
 
 describe("login and route authorization", () => {
   it.each([
-    [UPLOADER_KEY, "admin", "/admin?view=all", "uploader", "/members"],
-    [UPLOADER_KEY, "admin", "/admin/nested", "uploader", "/members"],
-    [UPLOADER_KEY, "admin", "/games?page=2", "uploader", "/games?page=2"],
-    [UPLOADER_KEY, "admin", "//evil.test", "uploader", "/"],
-    [ADMIN_KEY, "uploader", "/admin", "admin", "/admin"],
+    [VIEWER_KEY, "admin", "/admin?view=all", "viewer", "/"],
+    [VIEWER_KEY, "admin", "/admin/nested", "viewer", "/"],
+    [VIEWER_KEY, "admin", "/games?page=2", "viewer", "/games?page=2"],
+    [VIEWER_KEY, "admin", "//evil.test", "viewer", "/"],
+    [VIEWER_KEY, "owner", "/", "viewer", "/"],
+    [ADMIN_KEY, "viewer", "/", "admin", "/games"],
+    [OWNER_KEY, "viewer", "/", "owner", "/games"],
+    [ADMIN_KEY, "viewer", "/admin", "admin", "/admin"],
+    [ADMIN_KEY, "owner", "/admin/audit", "admin", "/games"],
+    [OWNER_KEY, "viewer", "/admin/audit", "owner", "/admin/audit"],
   ])(
     "uses the matching key for role and safe redirect to %s",
     async (key, submittedRole, redirectTo, role, destination) => {
@@ -301,9 +412,22 @@ describe("login and route authorization", () => {
     },
   );
 
+  it.each([
+    [VIEWER_KEY, "/"],
+    [ADMIN_KEY, "/games"],
+    [OWNER_KEY, "/games"],
+  ])(
+    "chooses the role's landing when no destination is supplied",
+    async (key, destination) => {
+      await expect(login(null, form({ password: key }))).rejects.toThrow(
+        `redirect:${destination}`,
+      );
+    },
+  );
+
   it("does not issue a session when authentication configuration is invalid", async () => {
     vi.stubEnv("AUTH_SECRET", "");
-    const result = await login(null, form({ password: UPLOADER_KEY }));
+    const result = await login(null, form({ password: VIEWER_KEY }));
     expect(result?.error).toContain("설정");
     expect(mocks.setCookie).not.toHaveBeenCalled();
   });
@@ -317,10 +441,10 @@ describe("login and route authorization", () => {
     );
   });
 
-  it.each(["/admin", "/admin/", "/admin/nested"])(
-    "redirects uploader requests for %s",
+  it.each(["/admin", "/admin/", "/admin/nested", "/upload"])(
+    "redirects viewer requests for %s",
     async (path) => {
-      mocks.token = await createSessionToken("uploader");
+      mocks.token = await sessionToken("viewer");
       const response = await proxy(
         new NextRequest(`http://localhost${path}`, {
           headers: { cookie: `${SESSION_COOKIE}=${mocks.token}` },
@@ -330,10 +454,27 @@ describe("login and route authorization", () => {
     },
   );
 
-  it.each(["uploader", "admin"] as const)(
+  it.each(["viewer", "admin"] as const)(
+    "blocks %s audit paths at Proxy",
+    async (role) => {
+      mocks.token = await sessionToken(role);
+      for (const path of ["/admin/audit", "/admin/audit/nested"]) {
+        const response = await proxy(
+          new NextRequest(`http://localhost${path}`, {
+            headers: { cookie: `${SESSION_COOKIE}=${mocks.token}` },
+          }),
+        );
+        expect(response.headers.get("location")).toBe(
+          "http://localhost/members",
+        );
+      }
+    },
+  );
+
+  it.each(["admin", "owner"] as const)(
     "allows %s read and upload paths",
     async (role) => {
-      mocks.token = await createSessionToken(role);
+      mocks.token = await sessionToken(role);
       for (const path of [
         "/members",
         "/games?view=excluded",
@@ -354,12 +495,14 @@ describe("login and route authorization", () => {
   );
 
   it("checks the admin page before any management query without relying on Proxy", async () => {
-    await expect(AdminPage()).rejects.toThrow("redirect:/login");
-    mocks.token = await createSessionToken("uploader");
+    await expect(AdminPage()).rejects.toThrow(
+      "redirect:/login?redirectTo=%2Fadmin",
+    );
+    mocks.token = await sessionToken("viewer");
     await expect(AdminPage()).rejects.toThrow("redirect:/members");
     expect(mocks.listMembers).not.toHaveBeenCalled();
     expect(mocks.listUnlinked).not.toHaveBeenCalled();
-    mocks.token = await createSessionToken("admin");
+    mocks.token = await sessionToken("admin");
     expect(renderToStaticMarkup(await AdminPage())).toContain("모임원 추가");
     expect(mocks.listMembers).toHaveBeenCalledOnce();
     expect(mocks.listUnlinked).toHaveBeenCalledOnce();
@@ -368,7 +511,7 @@ describe("login and route authorization", () => {
 
 describe("verified role visibility", () => {
   it("renders separate champion rows with localized and unknown positions", async () => {
-    mocks.token = await createSessionToken("uploader");
+    mocks.token = await sessionToken("viewer");
     const member = { id: randomUUID(), name: "포지션 모임원", birthYear: null };
     const stats = {
       totalGames: 1,
@@ -425,10 +568,10 @@ describe("verified role visibility", () => {
     );
   });
 
-  it.each(["uploader", "admin"] as const)(
+  it.each(["viewer", "admin", "owner"] as const)(
     "restricts member management links for %s, including empty and ambiguous records",
     async (role) => {
-      mocks.token = await createSessionToken(role);
+      mocks.token = await sessionToken(role);
       const member = {
         id: randomUUID(),
         name: "조회 모임원",
@@ -439,7 +582,7 @@ describe("verified role visibility", () => {
         mocks.listMembers.mockResolvedValue(members);
         const html = renderToStaticMarkup(await MembersPage());
         expect(html).toContain("모임원 정보");
-        expect(html.includes('href="/admin"')).toBe(role === "admin");
+        expect(html.includes('href="/admin"')).toBe(role !== "viewer");
       }
       mocks.getMemberHistory.mockResolvedValue({
         member,
@@ -475,31 +618,40 @@ describe("verified role visibility", () => {
           searchParams: Promise.resolve({}),
         }),
       );
-      expect(html).toContain("조회 모임원의 전적");
+      expect(html).toContain(
+        role === "viewer" ? "조****원의 전적" : "조회 모임원의 전적",
+      );
       expect(html).toContain("계정 중복 연결 확인");
       expect(html).toContain("집계할 포지션 전적이 없습니다.");
-      expect(html.includes('href="/admin"')).toBe(role === "admin");
+      expect(html.includes('href="/admin"')).toBe(role !== "viewer");
     },
   );
 
-  it.each(["uploader", "admin"] as const)(
+  it.each(["viewer", "admin", "owner"] as const)(
     "renders navigation for %s",
     async (role) => {
-      mocks.token = await createSessionToken(role);
+      mocks.token = await sessionToken(role);
       const html = renderToStaticMarkup(
         await AppLayout({ children: <p>조회 내용</p> }),
       );
-      expect(html).toContain(role === "admin" ? "관리자" : "업로더");
-      expect(html.includes('href="/admin"')).toBe(role === "admin");
+      expect(html).toContain(
+        role === "owner"
+          ? "서비스 오너"
+          : role === "admin"
+            ? "관리자"
+            : "일반 사용자",
+      );
+      expect(html.includes('href="/admin"')).toBe(role !== "viewer");
       expect(html).toContain('href="/members"');
-      expect(html).toContain('href="/upload"');
+      expect(html.includes('href="/upload"')).toBe(role !== "viewer");
+      expect(html).toContain('href="/games"');
     },
   );
 
-  it.each(["uploader", "admin"] as const)(
+  it.each(["viewer", "admin", "owner"] as const)(
     "renders game reads and restricts controls for %s",
     async (role) => {
-      mocks.token = await createSessionToken(role);
+      mocks.token = await sessionToken(role);
       for (const excluded of [false, true]) {
         mocks.getGameDetail.mockResolvedValue({
           ...GAME,
@@ -512,12 +664,12 @@ describe("verified role visibility", () => {
           }),
         );
         expect(html).toContain("게임 상세");
-        expect(html.includes('data-management="date"')).toBe(role === "admin");
+        expect(html.includes('data-management="date"')).toBe(role !== "viewer");
         expect(
           html.includes(
             `data-management="${excluded ? "restore" : "exclude"}"`,
           ),
-        ).toBe(role === "admin");
+        ).toBe(role !== "viewer");
       }
       const list = renderToStaticMarkup(
         await GamesPage({
@@ -525,7 +677,9 @@ describe("verified role visibility", () => {
         }),
       );
       expect(list).toContain("상세");
-      expect(list.includes('data-management="restore"')).toBe(role === "admin");
+      expect(list.includes('data-management="restore"')).toBe(
+        role !== "viewer",
+      );
     },
   );
 });

@@ -1,3 +1,4 @@
+import { ownerActor, ownerSession } from "@/test/actor";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
@@ -24,7 +25,9 @@ import { parseRofl, type ParsedGame } from "./rofl/parser";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/db", async () => ({ db: (await import("@/test/database")).db }));
-vi.mock("@/lib/session", () => ({ hasValidSession: vi.fn(async () => true) }));
+vi.mock("@/lib/session", () => ({
+  getSession: vi.fn(async () => ownerSession),
+}));
 vi.mock("@vercel/blob", () => ({ del: vi.fn(async () => {}) }));
 
 // Opt-in only: the private replay stays at its original path, is read without
@@ -103,6 +106,7 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
   async function binding() {
     const pending = await uploadStore.createPendingUpload(
       "replay-test-session",
+      ownerActor,
     );
     const blobUrl = `https://replay-test.public.blob.vercel-storage.com/${pending.pathname}`;
     authorizedUrls.add(blobUrl);

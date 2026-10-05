@@ -3,6 +3,8 @@ import "server-only";
 import { and, eq, gt } from "drizzle-orm";
 
 import { db } from "@/db";
+import type { Actor } from "@/lib/auth";
+import { appendAudit, withActorTransaction } from "@/lib/audit";
 import { pendingUploads, type PendingUpload } from "@/db/schema";
 import { PENDING_UPLOAD_TTL_MS, UPLOAD_BUDGET } from "@/lib/limits";
 import { generateNonce, hashNonce, replayPathname } from "@/lib/pending-upload";
@@ -19,6 +21,7 @@ export class UploadBudgetExceeded extends Error {}
 
 export async function createPendingUpload(
   sessionToken: string,
+  actor: Actor,
 ): Promise<CreatedPendingUpload> {
   const allowed = await consumeRequestBudgets([
     {
@@ -37,11 +40,23 @@ export async function createPendingUpload(
   const uploadId = crypto.randomUUID();
   const nonce = generateNonce();
   const pathname = replayPathname(uploadId);
-  await db.insert(pendingUploads).values({
-    id: uploadId,
-    nonceHash: hashNonce(nonce),
-    pathname,
-    expiresAt: new Date(Date.now() + PENDING_UPLOAD_TTL_MS),
+  await withActorTransaction(actor, async (tx) => {
+    await tx.insert(pendingUploads).values({
+      id: uploadId,
+      nonceHash: hashNonce(nonce),
+      pathname,
+      actorRole: actor.role,
+      actorMemberId: actor.memberId,
+      actorCredentialId: actor.credentialId,
+      actorName: actor.name,
+      expiresAt: new Date(Date.now() + PENDING_UPLOAD_TTL_MS),
+    });
+    await appendAudit(tx, actor, {
+      action: "replay.reserved",
+      targetType: "upload",
+      targetId: uploadId,
+      requestId: uploadId,
+    });
   });
   return { uploadId, nonce, pathname };
 }
