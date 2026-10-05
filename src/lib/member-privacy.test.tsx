@@ -384,6 +384,18 @@ describe("read model authorization and page privacy", () => {
     },
   );
 
+  it("shows the reader landing without querying member or game records", async () => {
+    await signIn("viewer");
+    const html = renderToStaticMarkup(await HomePage());
+    expect(html).toContain('type="search"');
+    expect(html).toContain('action="/search"');
+    expect(html).toContain('method="get"');
+    expect(html).toContain('role="combobox"');
+    expect(html).not.toContain("검색 기능은 준비 중입니다.");
+    expect(mocks.listMembers).not.toHaveBeenCalled();
+    expect(mocks.gameDetail).not.toHaveBeenCalled();
+  });
+
   it.each(["admin", "owner"] as const)(
     "keeps %s home navigation on games",
     async (role) => {
