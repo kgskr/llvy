@@ -37,7 +37,15 @@ export type MemberHistory = {
   member: { id: string; name: string; birthYear: number | null };
   accounts: { id: string; gameName: string; tagLine: string }[];
   stats: MemberHistoryStats;
-  championStats: (MemberHistoryStats & { champion: string })[];
+  championStats: (MemberHistoryStats & {
+    champion: string;
+    position: string | null;
+  })[];
+  positionStats: {
+    position: string | null;
+    totalGames: number;
+    winRate: number | null;
+  }[];
   games: MemberHistoryGame[];
 };
 
@@ -106,84 +114,115 @@ export async function getMemberHistory(
       .groupBy(games.id),
   );
 
-  const [accounts, [stats], history, championStats] = await Promise.all([
-    db
-      .select({
-        id: riotAccounts.id,
-        gameName: riotAccounts.gameName,
-        tagLine: riotAccounts.tagLine,
-      })
-      .from(riotAccounts)
-      .where(eq(riotAccounts.memberId, memberId))
-      .orderBy(
-        asc(riotAccounts.gameName),
-        asc(riotAccounts.tagLine),
-        asc(riotAccounts.id),
-      ),
-    db
-      .with(memberGames)
-      .select({
-        totalGames: sql<number>`count(*)::int`,
-        wins: sql<number>`(count(*) filter (where ${memberGames.result} = 'win'))::int`,
-        losses: sql<number>`(count(*) filter (where ${memberGames.result} = 'loss'))::int`,
-        undecided: sql<number>`(count(*) filter (where ${memberGames.result} = 'unknown'))::int`,
-        winRate: sql<number | null>`(
+  const [accounts, [stats], history, championStats, positionStats] =
+    await Promise.all([
+      db
+        .select({
+          id: riotAccounts.id,
+          gameName: riotAccounts.gameName,
+          tagLine: riotAccounts.tagLine,
+        })
+        .from(riotAccounts)
+        .where(eq(riotAccounts.memberId, memberId))
+        .orderBy(
+          asc(riotAccounts.gameName),
+          asc(riotAccounts.tagLine),
+          asc(riotAccounts.id),
+        ),
+      db
+        .with(memberGames)
+        .select({
+          totalGames: sql<number>`count(*)::int`,
+          wins: sql<number>`(count(*) filter (where ${memberGames.result} = 'win'))::int`,
+          losses: sql<number>`(count(*) filter (where ${memberGames.result} = 'loss'))::int`,
+          undecided: sql<number>`(count(*) filter (where ${memberGames.result} = 'unknown'))::int`,
+          winRate: sql<number | null>`(
           100.0 * count(*) filter (where ${memberGames.result} = 'win')
           / nullif(count(*) filter (where ${memberGames.result} in ('win', 'loss')), 0)
         )::float8`,
-        // PostgreSQL avg ignores NULL independently for each counter, including
-        // the NULLs deliberately produced for ambiguous participation above.
-        averageKills: sql<number | null>`avg(${memberGames.kills})::float8`,
-        averageDeaths: sql<number | null>`avg(${memberGames.deaths})::float8`,
-        averageAssists: sql<number | null>`avg(${memberGames.assists})::float8`,
-      })
-      .from(memberGames),
-    db
-      .with(memberGames)
-      .select({
-        id: memberGames.id,
-        playedAt: memberGames.playedAt,
-        playedAtSource: memberGames.playedAtSource,
-        durationMs: memberGames.durationMs,
-        champion: memberGames.champion,
-        position: memberGames.position,
-        kills: memberGames.kills,
-        deaths: memberGames.deaths,
-        assists: memberGames.assists,
-        result: memberGames.result,
-        ambiguous: memberGames.ambiguous,
-      })
-      .from(memberGames)
-      .orderBy(
-        desc(memberGames.playedAt),
-        desc(memberGames.uploadedAt),
-        desc(memberGames.id),
-      )
-      .limit(
-        Number.isSafeInteger(limit) && limit >= 0 ? Math.min(limit, 100) : 25,
-      )
-      .offset(Number.isSafeInteger(offset) && offset >= 0 ? offset : 0),
-    db
-      .with(memberGames)
-      .select({
-        champion: sql<string>`${memberGames.champion}`,
-        totalGames: sql<number>`count(*)::int`,
-        wins: sql<number>`(count(*) filter (where ${memberGames.result} = 'win'))::int`,
-        losses: sql<number>`(count(*) filter (where ${memberGames.result} = 'loss'))::int`,
-        undecided: sql<number>`(count(*) filter (where ${memberGames.result} = 'unknown'))::int`,
-        winRate: sql<number | null>`(
+          // PostgreSQL avg ignores NULL independently for each counter, including
+          // the NULLs deliberately produced for ambiguous participation above.
+          averageKills: sql<number | null>`avg(${memberGames.kills})::float8`,
+          averageDeaths: sql<number | null>`avg(${memberGames.deaths})::float8`,
+          averageAssists: sql<
+            number | null
+          >`avg(${memberGames.assists})::float8`,
+        })
+        .from(memberGames),
+      db
+        .with(memberGames)
+        .select({
+          id: memberGames.id,
+          playedAt: memberGames.playedAt,
+          playedAtSource: memberGames.playedAtSource,
+          durationMs: memberGames.durationMs,
+          champion: memberGames.champion,
+          position: memberGames.position,
+          kills: memberGames.kills,
+          deaths: memberGames.deaths,
+          assists: memberGames.assists,
+          result: memberGames.result,
+          ambiguous: memberGames.ambiguous,
+        })
+        .from(memberGames)
+        .orderBy(
+          desc(memberGames.playedAt),
+          desc(memberGames.uploadedAt),
+          desc(memberGames.id),
+        )
+        .limit(
+          Number.isSafeInteger(limit) && limit >= 0 ? Math.min(limit, 100) : 25,
+        )
+        .offset(Number.isSafeInteger(offset) && offset >= 0 ? offset : 0),
+      db
+        .with(memberGames)
+        .select({
+          champion: sql<string>`${memberGames.champion}`,
+          position: memberGames.position,
+          totalGames: sql<number>`count(*)::int`,
+          wins: sql<number>`(count(*) filter (where ${memberGames.result} = 'win'))::int`,
+          losses: sql<number>`(count(*) filter (where ${memberGames.result} = 'loss'))::int`,
+          undecided: sql<number>`(count(*) filter (where ${memberGames.result} = 'unknown'))::int`,
+          winRate: sql<number | null>`(
           100.0 * count(*) filter (where ${memberGames.result} = 'win')
           / nullif(count(*) filter (where ${memberGames.result} in ('win', 'loss')), 0)
         )::float8`,
-        averageKills: sql<number | null>`avg(${memberGames.kills})::float8`,
-        averageDeaths: sql<number | null>`avg(${memberGames.deaths})::float8`,
-        averageAssists: sql<number | null>`avg(${memberGames.assists})::float8`,
-      })
-      .from(memberGames)
-      .where(sql`${memberGames.champion} is not null`)
-      .groupBy(memberGames.champion)
-      .orderBy(desc(sql`count(*)`), asc(memberGames.champion)),
-  ]);
+          averageKills: sql<number | null>`avg(${memberGames.kills})::float8`,
+          averageDeaths: sql<number | null>`avg(${memberGames.deaths})::float8`,
+          averageAssists: sql<
+            number | null
+          >`avg(${memberGames.assists})::float8`,
+        })
+        .from(memberGames)
+        .where(sql`${memberGames.champion} is not null`)
+        .groupBy(memberGames.champion, memberGames.position)
+        .orderBy(
+          desc(sql`count(*)`),
+          asc(memberGames.champion),
+          asc(memberGames.position),
+        ),
+      db
+        .with(memberGames)
+        .select({
+          position: memberGames.position,
+          totalGames: sql<number>`count(*)::int`,
+          winRate: sql<number | null>`(
+          100.0 * count(*) filter (where ${memberGames.result} = 'win')
+          / nullif(count(*) filter (where ${memberGames.result} in ('win', 'loss')), 0)
+        )::float8`,
+        })
+        .from(memberGames)
+        .where(sql`not ${memberGames.ambiguous}`)
+        .groupBy(memberGames.position)
+        .orderBy(desc(sql`count(*)`), asc(memberGames.position)),
+    ]);
 
-  return { member, accounts, stats, games: history, championStats };
+  return {
+    member,
+    accounts,
+    stats,
+    games: history,
+    championStats,
+    positionStats,
+  };
 }

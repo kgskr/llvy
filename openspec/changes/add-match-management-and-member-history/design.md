@@ -26,11 +26,17 @@
    단일 참가자라도 winning_team이 불명인 경기는 승패 미정이다. 승률 분모는 승+패이며 0이면 null.
    평균 K/D/A는 각 값의 null을 제외한 평균이며 데이터 없음은 null, 표시는 소수 첫째 자리.
    제외 경기는 모든 개인 집계·기록에서 제외한다. 계정이 없거나 경기가 없어도 모임원 페이지는 정상 표시한다.
-5. 챔피언별 요약은 동일한 게임별 집계 CTE에서 챔피언으로 그룹화하고, 최근 경기의 limit/offset과 무관하게 전체 활성 전적을 조회한다.
+5. 챔피언별 요약은 동일한 게임별 집계 CTE에서 챔피언과 포지션 조합으로 그룹화하고, 최근 경기의 limit/offset과 무관하게 전체 활성 전적을 조회한다.
    계정 중복 연결 및 챔피언 미확인 경기는 챔피언별 요약에서 제외한다. 미정 승패는 승률 분모에서 제외하고 평균 K/D/A는 각 값의 null을 독립적으로 제외한다.
-   경기 수 내림차순, 동률이면 내부 챔피언 이름 오름차순으로 표시한다. 기존 DataDragon 조회로 요약과 최근 경기의 챔피언 표시명을 함께 변환하며 조회 실패 시 내부명을 표시한다.
+   포지션이 null인 경기는 해당 챔피언의 별도 ‘불명’ 행으로 집계하며 기존 positionLabel을 재사용한다.
+   경기 수 내림차순, 동률이면 내부 챔피언 이름과 포지션 오름차순(NULL은 마지막)으로 표시한다.
+   표에 포지션 컬럼을 추가하고 React 행 key는 챔피언과 nullable 포지션의 조합으로 지정한다. 기존 position 컬럼을 사용하므로 추가 마이그레이션은 없다. 기존 DataDragon 조회로 요약과 최근 경기의 챔피언 표시명을 함께 변환하며 조회 실패 시 내부명을 표시한다.
    요약은 연결된 라이엇 계정 영역 위에 배치하고, 집계 대상이 없으면 빈 상태를 표시한다.
 6. `/members` 제목은 ‘모임원 정보’이며 이름 링크를 `이름(생년)`으로 표시한다. 생년이 null이면 이름만 표시한다. 같은 상세 URL로 이동하는 별도 ‘전적 보기’ 링크는 제거한다.
+
+7. 플레이 포지션 표는 챔피언 표 바로 아래, 연결 계정 위에 배치한다. 게임별 CTE를 포지션으로 그룹화해 전체 활성 전적의 플레이 횟수와 승률을 계산한다.
+   챔피언 미확인 경기도 포함하지만 중복 계정 연결 경기는 제외한다. 포지션 null은 ‘불명’ 행이며 승패 미정은 횟수에 포함하고 승률 분모에서 제외한다.
+   승패가 결정된 경기가 없으면 승률은 null/‘—’이다. 횟수 내림차순, 동률이면 포지션 오름차순(NULL 마지막)으로 표시한다. 집계 대상이 없으면 빈 상태를 표시한다.
 
 ### Shared implementation contracts
 
@@ -38,7 +44,8 @@
 - `GameListItem`에는 기존 필드를 유지. `GameDetail`에는 `excludedAt: Date|null`, `originalPlayedAt: Date`, `originalPlayedAtSource: string`, `playedAtOverride: Date|null` 추가. playedAt/source는 유효값/출처.
 - `setGameExcluded(id: string, excluded: boolean): Promise<boolean>`와 `setGamePlayedAt(id: string, playedAt: Date|null): Promise<boolean>`를 games.ts에서 제공. 잘못된 UUID나 존재하지 않는 행은 false.
 - `src/lib/member-history.ts`: `getMemberHistory(memberId, limit=25, offset=0)` → null 또는 `{member:{id,name,birthYear}, accounts:[{id,gameName,tagLine}], stats:{totalGames,wins,losses,undecided,winRate,averageKills,averageDeaths,averageAssists}, games:[{id,playedAt,playedAtSource,durationMs,champion,position,kills,deaths,assists,result,ambiguous}]}`. result="win"|"loss"|"unknown". winRate는 0~100 또는 null. totals는 페이지와 무관한 전체 집계.
-- 반환값에 `championStats: (MemberHistoryStats & {champion: string})[]`를 추가한다. 요약은 페이지와 무관하며 기존 전체 통계 필드와 동일한 의미를 사용한다.
+- 반환값에 `championStats: (MemberHistoryStats & {champion: string, position: string|null})[]`를 추가한다. 요약은 페이지와 무관하며 기존 전체 통계 필드와 동일한 의미를 사용한다.
+- 반환값에 `positionStats: {position: string|null, totalGames: number, winRate: number|null}[]`를 추가한다. 기존 저장 데이터를 사용하며 추가 마이그레이션은 없다.
 - 모임원 목록은 기존 `listMembersWithAccounts()`를 사용한다. 개인 기록은 `/members/[id]`, 목록은 `/members`.
 
 ## Risks / Trade-offs

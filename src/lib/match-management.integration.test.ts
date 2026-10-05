@@ -359,6 +359,7 @@ describe("combined member history", () => {
     expect(history?.championStats).toEqual([
       {
         champion: "Ahri",
+        position: "MIDDLE",
         totalGames: 2,
         wins: 1,
         losses: 1,
@@ -370,6 +371,7 @@ describe("combined member history", () => {
       },
       {
         champion: "Lux",
+        position: "MIDDLE",
         ...emptyStats,
         totalGames: 1,
         undecided: 1,
@@ -384,6 +386,145 @@ describe("combined member history", () => {
         (row) => row.champion,
       ),
     ).toEqual(["Ahri", "Garen", "Lux"]);
+  });
+
+  it("separates champion positions and combines matching and unknown positions across accounts", async () => {
+    await storeGame([
+      player("main", { TEAM_POSITION: "MIDDLE", CHAMPIONS_KILLED: "6" }),
+      player("opponent", { TEAM: "200", WIN: "Fail" }),
+    ]);
+    await storeGame([
+      player("alt", {
+        TEAM_POSITION: "MIDDLE",
+        CHAMPIONS_KILLED: "2",
+        WIN: "Fail",
+      }),
+      player("opponent", { TEAM: "200" }),
+    ]);
+    const support = await storeGame([
+      player("main", { TEAM_POSITION: "UTILITY", CHAMPIONS_KILLED: "1" }),
+      player("opponent", { TEAM: "200", WIN: "Fail" }),
+    ]);
+    for (const account of ["main", "alt"]) {
+      await storeGame([
+        player(account, {
+          TEAM_POSITION: null,
+          INDIVIDUAL_POSITION: null,
+          CHAMPIONS_KILLED: "4",
+        }),
+      ]);
+    }
+    const memberId = await createMember("Position summary", 1997);
+    await linkPuuid("main", memberId);
+    await linkPuuid("alt", memberId);
+    const history = await getMemberHistory(memberId, 1, 1);
+    expect(history?.championStats).toEqual([
+      {
+        champion: "Ahri",
+        position: "MIDDLE",
+        totalGames: 2,
+        wins: 1,
+        losses: 1,
+        undecided: 0,
+        winRate: 50,
+        averageKills: 4,
+        averageDeaths: 2,
+        averageAssists: 7,
+      },
+      {
+        champion: "Ahri",
+        position: null,
+        totalGames: 2,
+        wins: 0,
+        losses: 0,
+        undecided: 2,
+        winRate: null,
+        averageKills: 4,
+        averageDeaths: 2,
+        averageAssists: 7,
+      },
+      {
+        champion: "Ahri",
+        position: "UTILITY",
+        totalGames: 1,
+        wins: 1,
+        losses: 0,
+        undecided: 0,
+        winRate: 100,
+        averageKills: 1,
+        averageDeaths: 2,
+        averageAssists: 7,
+      },
+    ]);
+    expect((await getMemberHistory(memberId, 1, 100))?.championStats).toEqual(
+      history?.championStats,
+    );
+    await setGameExcluded(support.gameId, true);
+    expect(
+      (await getMemberHistory(memberId))?.championStats.map(
+        (row) => row.position,
+      ),
+    ).toEqual(["MIDDLE", null]);
+    await setGameExcluded(support.gameId, false);
+    expect((await getMemberHistory(memberId))?.championStats).toEqual(
+      history?.championStats,
+    );
+  });
+
+  it("summarizes positions independently of champions and pages while excluding ambiguous games", async () => {
+    await storeGame([
+      player("main"),
+      player("opponent", { TEAM: "200", WIN: "Fail" }),
+    ]);
+    await storeGame([
+      player("alt", { SKIN: "Lux", WIN: "Fail" }),
+      player("opponent", { TEAM: "200" }),
+    ]);
+    const missingChampion = await storeGame([
+      player("main", { SKIN: "Garen" }),
+    ]);
+    await db
+      .update(gameParticipants)
+      .set({ champion: null })
+      .where(eq(gameParticipants.gameId, missingChampion.gameId));
+    const support = await storeGame([
+      player("alt", { TEAM_POSITION: "UTILITY" }),
+      player("opponent", { TEAM: "200", WIN: "Fail" }),
+    ]);
+    await storeGame([
+      player("main", { TEAM_POSITION: null, INDIVIDUAL_POSITION: null }),
+    ]);
+    await storeGame([
+      player("main", { TEAM_POSITION: "TOP" }),
+      player("alt", { TEAM_POSITION: "TOP" }),
+    ]);
+    const memberId = await createMember("Position totals", null);
+    await linkPuuid("main", memberId);
+    const altId = await linkPuuid("alt", memberId);
+    const expected = [
+      { position: "MIDDLE", totalGames: 3, winRate: 50 },
+      { position: "UTILITY", totalGames: 1, winRate: 100 },
+      { position: null, totalGames: 1, winRate: null },
+    ];
+    expect((await getMemberHistory(memberId, 1, 1))?.positionStats).toEqual(
+      expected,
+    );
+    expect((await getMemberHistory(memberId, 1, 100))?.positionStats).toEqual(
+      expected,
+    );
+    await setGameExcluded(support.gameId, true);
+    expect((await getMemberHistory(memberId))?.positionStats).toEqual([
+      expected[0],
+      expected[2],
+    ]);
+    await setGameExcluded(support.gameId, false);
+    expect((await getMemberHistory(memberId))?.positionStats).toEqual(expected);
+    await unlinkAccount(altId);
+    expect((await getMemberHistory(memberId))?.positionStats).toEqual([
+      { position: "MIDDLE", totalGames: 2, winRate: 100 },
+      { position: "TOP", totalGames: 1, winRate: null },
+      expected[2],
+    ]);
   });
 
   it("combines accounts with independent non-null averages and page-independent aggregates", async () => {
@@ -648,6 +789,7 @@ describe("combined member history", () => {
       stats: emptyStats,
       games: [],
       championStats: [],
+      positionStats: [],
     });
     const [account] = await db
       .insert(riotAccounts)

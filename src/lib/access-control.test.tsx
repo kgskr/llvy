@@ -367,6 +367,64 @@ describe("login and route authorization", () => {
 });
 
 describe("verified role visibility", () => {
+  it("renders separate champion rows with localized and unknown positions", async () => {
+    mocks.token = await createSessionToken("uploader");
+    const member = { id: randomUUID(), name: "포지션 모임원", birthYear: null };
+    const stats = {
+      totalGames: 1,
+      wins: 1,
+      losses: 0,
+      undecided: 0,
+      winRate: 100,
+      averageKills: 2,
+      averageDeaths: 3,
+      averageAssists: 4,
+    };
+    mocks.getMemberHistory.mockResolvedValue({
+      member,
+      accounts: [],
+      stats: { ...stats, totalGames: 3 },
+      championStats: ["MIDDLE", "UTILITY", null].map((position) => ({
+        ...stats,
+        champion: "Ahri",
+        position,
+      })),
+      positionStats: [
+        { position: "MIDDLE", totalGames: 2, winRate: 50 },
+        { position: "UTILITY", totalGames: 1, winRate: 100 },
+        { position: null, totalGames: 1, winRate: null },
+      ],
+      games: [],
+    });
+    const html = renderToStaticMarkup(
+      await MemberHistoryPage({
+        params: Promise.resolve({ id: member.id }),
+        searchParams: Promise.resolve({}),
+      }),
+    );
+    expect(html).toContain('<th scope="col">포지션</th>');
+    for (const label of ["미드", "서폿", "불명"]) {
+      expect(html).toContain(
+        `<th scope="row">Ahri</th><td>${label}</td><td>1경기</td>`,
+      );
+    }
+    expect(html.match(/<th scope="row">Ahri<\/th>/g)).toHaveLength(3);
+    expect(html).toContain('<th scope="col">플레이 횟수</th>');
+    expect(html).toContain(
+      '<th scope="row">미드</th><td>2회</td><td>50.0%</td>',
+    );
+    expect(html).toContain(
+      '<th scope="row">서폿</th><td>1회</td><td>100.0%</td>',
+    );
+    expect(html).toContain('<th scope="row">불명</th><td>1회</td><td>—</td>');
+    expect(html.indexOf("플레이한 챔피언")).toBeLessThan(
+      html.indexOf("플레이 포지션"),
+    );
+    expect(html.indexOf("플레이 포지션")).toBeLessThan(
+      html.indexOf("연결된 라이엇 계정"),
+    );
+  });
+
   it.each(["uploader", "admin"] as const)(
     "restricts member management links for %s, including empty and ambiguous records",
     async (role) => {
@@ -397,6 +455,7 @@ describe("verified role visibility", () => {
           averageAssists: null,
         },
         championStats: [],
+        positionStats: [],
         games: [
           {
             ...GAME,
@@ -418,6 +477,7 @@ describe("verified role visibility", () => {
       );
       expect(html).toContain("조회 모임원의 전적");
       expect(html).toContain("계정 중복 연결 확인");
+      expect(html).toContain("집계할 포지션 전적이 없습니다.");
       expect(html.includes('href="/admin"')).toBe(role === "admin");
     },
   );

@@ -54,7 +54,8 @@ export default async function MemberHistoryPage({
   );
   if (page > pageCount) redirect(`/members/${id}?page=${pageCount}`);
 
-  const { member, accounts, stats, games, championStats } = history;
+  const { member, accounts, stats, games, championStats, positionStats } =
+    history;
   const champions = [
     ...championStats.map((summary) => summary.champion),
     ...games.flatMap((game) => (game.champion ? [game.champion] : [])),
@@ -116,6 +117,7 @@ export default async function MemberHistoryPage({
               <thead>
                 <tr>
                   <th scope="col">챔피언</th>
+                  <th scope="col">포지션</th>
                   <th scope="col">경기 수</th>
                   <th scope="col">승 / 패 / 미정</th>
                   <th scope="col">승률</th>
@@ -124,10 +126,13 @@ export default async function MemberHistoryPage({
               </thead>
               <tbody>
                 {championStats.map((summary) => (
-                  <tr key={summary.champion}>
+                  <tr
+                    key={JSON.stringify([summary.champion, summary.position])}
+                  >
                     <th scope="row">
                       {championNames.get(summary.champion) ?? summary.champion}
                     </th>
+                    <td>{positionLabel(summary.position)}</td>
                     <td>{summary.totalGames.toLocaleString()}경기</td>
                     <td>
                       {summary.wins} / {summary.losses} / {summary.undecided}
@@ -149,8 +154,46 @@ export default async function MemberHistoryPage({
           </div>
         )}
         <p className="form-note">
-          연결된 모든 계정의 전체 전적을 챔피언별로 집계합니다. 챔피언을 확인할
-          수 없는 경기와 계정 중복 연결 경기는 제외합니다.
+          연결된 모든 계정의 전체 전적을 챔피언·포지션별로 집계합니다. 포지션을
+          확인할 수 없으면 ‘불명’으로 표시하며, 챔피언을 확인할 수 없는 경기와
+          계정 중복 연결 경기는 제외합니다.
+        </p>
+      </section>
+
+      <section className="card stack">
+        <h2>플레이 포지션</h2>
+        {positionStats.length === 0 ? (
+          <p className="muted">집계할 포지션 전적이 없습니다.</p>
+        ) : (
+          <div className="table-scroll">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th scope="col">포지션</th>
+                  <th scope="col">플레이 횟수</th>
+                  <th scope="col">승률</th>
+                </tr>
+              </thead>
+              <tbody>
+                {positionStats.map((summary) => (
+                  <tr key={JSON.stringify(summary.position)}>
+                    <th scope="row">{positionLabel(summary.position)}</th>
+                    <td>{summary.totalGames.toLocaleString()}회</td>
+                    <td>
+                      {summary.winRate === null
+                        ? "—"
+                        : `${summary.winRate.toFixed(1)}%`}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className="form-note">
+          연결된 모든 계정의 전체 활성 전적을 포지션별로 집계합니다. 승률은
+          승패가 결정된 경기 기준이며, 포지션 미확인은 ‘불명’으로 표시합니다.
+          계정 중복 연결 경기는 제외합니다.
         </p>
       </section>
 
