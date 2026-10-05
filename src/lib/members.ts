@@ -1,11 +1,12 @@
 import "server-only";
 
-import { asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import {
   adminCredentials,
   gameParticipants,
+  games,
   members,
   riotAccounts,
 } from "@/db/schema";
@@ -29,22 +30,41 @@ export type UnlinkedAccount = {
 };
 
 /** All members with their linked Riot accounts, ordered by name. */
-export async function listMembersWithAccounts(): Promise<
-  AdminMemberWithAccounts[]
-> {
+export async function listMembersWithAccounts(
+  limit?: number,
+  offset = 0,
+): Promise<AdminMemberWithAccounts[]> {
+  const selection = db
+    .select()
+    .from(members)
+    .orderBy(asc(members.name), asc(members.id))
+    .$dynamic();
+  if (limit !== undefined)
+    selection
+      .limit(
+        Number.isSafeInteger(limit) ? Math.min(100, Math.max(1, limit)) : 10,
+      )
+      .offset(Number.isSafeInteger(offset) ? Math.max(0, offset) : 0);
+  const memberPage = selection.as("member_page");
   const rows = await db
     .select({
-      id: members.id,
-      name: members.name,
-      birthYear: members.birthYear,
-      administrator: sql<boolean>`exists (select 1 from ${adminCredentials} where ${adminCredentials.memberId} = ${members.id} and ${adminCredentials.revokedAt} is null)`,
+      id: memberPage.id,
+      name: memberPage.name,
+      birthYear: memberPage.birthYear,
+      administrator: sql<boolean>`exists (select 1 from ${adminCredentials}
+        where ${adminCredentials.memberId} = ${memberPage.id} and ${adminCredentials.revokedAt} is null)`,
       accountId: riotAccounts.id,
       gameName: riotAccounts.gameName,
       tagLine: riotAccounts.tagLine,
     })
-    .from(members)
-    .leftJoin(riotAccounts, eq(riotAccounts.memberId, members.id))
-    .orderBy(asc(members.name));
+    .from(memberPage)
+    .leftJoin(riotAccounts, eq(riotAccounts.memberId, memberPage.id))
+    .orderBy(
+      asc(memberPage.name),
+      asc(memberPage.id),
+      asc(riotAccounts.gameName),
+      asc(riotAccounts.id),
+    );
 
   const byMember = new Map<string, AdminMemberWithAccounts>();
   for (const row of rows) {
@@ -71,8 +91,11 @@ export async function listMembersWithAccounts(): Promise<
 }
 
 /** Riot accounts not yet linked to a member, with how many games they appear in. */
-export async function listUnlinkedAccounts(): Promise<UnlinkedAccount[]> {
-  return db
+export async function listUnlinkedAccounts(
+  limit?: number,
+  offset = 0,
+): Promise<UnlinkedAccount[]> {
+  const query = db
     .select({
       id: riotAccounts.id,
       gameName: riotAccounts.gameName,
@@ -80,17 +103,55 @@ export async function listUnlinkedAccounts(): Promise<UnlinkedAccount[]> {
       gameCount: sql<number>`count(${gameParticipants.id})::int`,
     })
     .from(riotAccounts)
-    .leftJoin(
+    .innerJoin(
       gameParticipants,
       eq(gameParticipants.riotAccountId, riotAccounts.id),
     )
-    .where(isNull(riotAccounts.memberId))
+    .innerJoin(games, eq(games.id, gameParticipants.gameId))
+    .where(and(isNull(riotAccounts.memberId), isNull(games.excludedAt)))
     .groupBy(riotAccounts.id)
     .orderBy(
       desc(sql`count(${gameParticipants.id})`),
       asc(riotAccounts.gameName),
       asc(riotAccounts.id),
-    );
+    )
+    .$dynamic();
+  if (limit !== undefined)
+    query
+      .limit(
+        Number.isSafeInteger(limit) ? Math.min(100, Math.max(1, limit)) : 10,
+      )
+      .offset(Number.isSafeInteger(offset) ? Math.max(0, offset) : 0);
+  return query;
+}
+
+export async function countMembers(): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`count(*)::int` })
+    .from(members);
+  return row.total;
+}
+
+export async function listMemberOptions(): Promise<
+  { id: string; name: string }[]
+> {
+  return db
+    .select({ id: members.id, name: members.name })
+    .from(members)
+    .orderBy(asc(members.name), asc(members.id));
+}
+
+export async function countUnlinkedAccounts(): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<number>`count(distinct ${riotAccounts.id})::int` })
+    .from(riotAccounts)
+    .innerJoin(
+      gameParticipants,
+      eq(gameParticipants.riotAccountId, riotAccounts.id),
+    )
+    .innerJoin(games, eq(games.id, gameParticipants.gameId))
+    .where(and(isNull(riotAccounts.memberId), isNull(games.excludedAt)));
+  return row.total;
 }
 
 export async function createMember(

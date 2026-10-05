@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   updateMember: vi.fn(),
   linkAccount: vi.fn(),
   unlinkAccount: vi.fn(),
+  deleteMember: vi.fn(),
   listMembers: vi.fn(),
   listUnlinked: vi.fn(),
   countMembers: vi.fn(),
@@ -56,6 +57,8 @@ vi.mock("@/lib/member-mutations", () => ({
   updateMember: mocks.updateMember,
   linkAccount: mocks.linkAccount,
   unlinkAccount: mocks.unlinkAccount,
+  deleteMember: mocks.deleteMember,
+  ActiveAdministratorError: class ActiveAdministratorError extends Error {},
 }));
 vi.mock("@/lib/members", () => ({
   listMembersWithAccounts: mocks.listMembers,
@@ -154,6 +157,7 @@ import {
   updateMemberAction,
   linkAccountAction,
   unlinkAccountAction,
+  deleteMemberAction,
 } from "@/app/(app)/admin/actions";
 import {
   setGameExcludedAction,
@@ -185,6 +189,7 @@ const MUTATIONS = [
   updateMemberAction,
   linkAccountAction,
   unlinkAccountAction,
+  deleteMemberAction,
   setGameExcludedAction,
   updateGameDateAction,
   restoreGameDateAction,
@@ -194,6 +199,7 @@ const WRITES = [
   mocks.updateMember,
   mocks.linkAccount,
   mocks.unlinkAccount,
+  mocks.deleteMember,
   mocks.setGameExcluded,
   mocks.setGamePlayedAt,
   mocks.revalidatePath,

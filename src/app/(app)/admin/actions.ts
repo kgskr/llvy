@@ -3,7 +3,9 @@
 import { revalidatePath } from "next/cache";
 
 import {
+  ActiveAdministratorError,
   createMember,
+  deleteMember,
   linkAccount,
   unlinkAccount,
   updateMember,
@@ -30,7 +32,13 @@ async function runAdminAction(
         message: "로그인이 만료되었습니다. 다시 로그인하세요.",
       };
     }
-
+    if (error instanceof ActiveAdministratorError) {
+      return {
+        status: "error",
+        message:
+          "활성 관리자는 삭제할 수 없습니다. 서비스 오너가 관리자 지정을 취소한 후 삭제하세요.",
+      };
+    }
     console.error("Member administration failed", error);
     return {
       status: "error",
@@ -87,6 +95,37 @@ export async function updateMemberAction(
     }
     revalidateMembers();
     return { status: "success", message: "모임원 정보를 저장했습니다." };
+  });
+}
+
+export async function deleteMemberAction(
+  _previousState: AdminActionState,
+  formData: FormData,
+): Promise<AdminActionState> {
+  return runAdminAction(async () => {
+    const memberId = formData.get("memberId");
+    if (!isUuid(memberId)) {
+      return { status: "error", message: "삭제할 모임원을 확인하세요." };
+    }
+    if (formData.get("confirmed") !== "yes") {
+      return {
+        status: "error",
+        message: "영구 삭제 안내를 확인하고 체크하세요.",
+      };
+    }
+    if (!(await deleteMember(memberId))) {
+      return {
+        status: "error",
+        message: "모임원을 찾지 못했습니다. 목록을 새로고침하세요.",
+      };
+    }
+    revalidateMembers();
+    revalidatePath("/admin/audit");
+    return {
+      status: "success",
+      message:
+        "모임원을 삭제했습니다. 라이엇 계정 연결을 해제했으며 게임과 감사 기록은 보존했습니다.",
+    };
   });
 }
 

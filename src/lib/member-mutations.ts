@@ -1,9 +1,12 @@
 import "server-only";
 
-import { eq } from "drizzle-orm";
-import { members, riotAccounts } from "@/db/schema";
+import { and, eq, isNull, isNotNull } from "drizzle-orm";
+import { adminCredentials, members, riotAccounts } from "@/db/schema";
 import { appendAudit, withActorTransaction } from "@/lib/audit";
 import { assertAdmin } from "@/lib/session";
+import { isUuid } from "@/lib/validation";
+
+export class ActiveAdministratorError extends Error {}
 
 export async function createMember(
   name: string,
@@ -97,3 +100,55 @@ export function unlinkAccount(accountId: string): Promise<boolean> {
 }
 
 /** Actual deletion; game/account history and audit snapshots survive. */
+export async function deleteMember(id: string): Promise<boolean> {
+  const actor = await assertAdmin();
+  if (!isUuid(id)) return false;
+  return withActorTransaction(actor, async (tx) => {
+    const [before] = await tx
+      .select({ name: members.name, birthYear: members.birthYear })
+      .from(members)
+      .where(eq(members.id, id))
+      .for("update");
+    if (!before) return false;
+    const [active] = await tx
+      .select({ id: adminCredentials.id })
+      .from(adminCredentials)
+      .where(
+        and(
+          eq(adminCredentials.memberId, id),
+          isNull(adminCredentials.revokedAt),
+        ),
+      );
+    if (active) throw new ActiveAdministratorError();
+    const detached = await tx
+      .update(riotAccounts)
+      .set({ memberId: null, linkedAt: null })
+      .where(eq(riotAccounts.memberId, id))
+      .returning({ id: riotAccounts.id });
+    for (const account of detached) {
+      await appendAudit(tx, actor, {
+        action: "account.unlinked",
+        targetType: "account",
+        targetId: account.id,
+        before: { memberId: id },
+        after: { memberId: null, reason: "member_deleted" },
+      });
+    }
+    await tx
+      .delete(adminCredentials)
+      .where(
+        and(
+          eq(adminCredentials.memberId, id),
+          isNotNull(adminCredentials.revokedAt),
+        ),
+      );
+    await tx.delete(members).where(eq(members.id, id));
+    await appendAudit(tx, actor, {
+      action: "member.deleted",
+      targetType: "member",
+      targetId: id,
+      before,
+    });
+    return true;
+  });
+}
