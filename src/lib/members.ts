@@ -10,6 +10,7 @@ import {
   members,
   riotAccounts,
 } from "@/db/schema";
+import { invalidateQueryCache } from "@/lib/query-cache";
 
 export type MemberWithAccounts = {
   id: string;
@@ -162,6 +163,7 @@ export async function createMember(
     .insert(members)
     .values({ name, birthYear })
     .returning({ id: members.id });
+  await invalidateQueryCache();
   return rows[0].id;
 }
 
@@ -176,6 +178,7 @@ export async function updateMember(
     .set({ name, birthYear })
     .where(eq(members.id, id))
     .returning({ id: members.id });
+  if (rows.length) await invalidateQueryCache();
   return rows.length > 0;
 }
 
@@ -189,6 +192,7 @@ export async function linkAccount(
     .set({ memberId, linkedAt: new Date() })
     .where(eq(riotAccounts.id, accountId))
     .returning({ id: riotAccounts.id });
+  if (rows.length) await invalidateQueryCache();
   return rows.length > 0;
 }
 
@@ -198,5 +202,6 @@ export async function unlinkAccount(accountId: string): Promise<boolean> {
     .set({ memberId: null, linkedAt: null })
     .where(eq(riotAccounts.id, accountId))
     .returning({ id: riotAccounts.id });
+  if (rows.length) await invalidateQueryCache();
   return rows.length > 0;
 }

@@ -1,4 +1,5 @@
 import "server-only";
+import { invalidateQueryCache } from "@/lib/query-cache";
 
 import { createHash } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
@@ -172,6 +173,7 @@ export async function ingestReplay(input: {
       return { gameId, duplicate: false };
     }),
   );
+  if (!result.duplicate) await invalidateQueryCache();
   return result;
 }
 

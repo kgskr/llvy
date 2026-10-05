@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { gameParticipants, games, members, riotAccounts } from "@/db/schema";
 import { isUuid } from "@/lib/validation";
 import { validateGameDateInput } from "@/lib/game-date";
+import { invalidateQueryCache } from "@/lib/query-cache";
 
 export type GameVisibility = "active" | "excluded";
 
@@ -167,6 +168,7 @@ export async function setGameExcluded(
     })
     .where(eq(games.id, id))
     .returning({ id: games.id });
+  if (rows.length) await invalidateQueryCache();
   return rows.length > 0;
 }
 
@@ -184,5 +186,6 @@ export async function setGamePlayedAt(
     .set({ playedAtOverride: playedAt })
     .where(eq(games.id, id))
     .returning({ id: games.id });
+  if (rows.length) await invalidateQueryCache();
   return rows.length > 0;
 }

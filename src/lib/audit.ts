@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { adminCredentials, auditLogs } from "@/db/schema";
 import type { Actor } from "@/lib/auth";
 import { ForbiddenError, UnauthorizedError } from "@/lib/auth-errors";
+import { invalidateQueryCache } from "@/lib/query-cache";
 
 export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
 export type AuditChanges = {
@@ -114,6 +115,7 @@ export async function withActorTransaction<T>(
     await lockActor(tx, actor);
     return work(tx);
   });
+  if (result !== false) await invalidateQueryCache();
   return result;
 }
 
