@@ -4,9 +4,11 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import {
+  AuthConfigurationError,
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
   createSessionToken,
+  isAdminPath,
 } from "@/lib/auth";
 import { attemptLogin } from "@/lib/login";
 import { sanitizeRedirect } from "@/lib/redirect";
@@ -31,12 +33,25 @@ export async function login(
     String(formData.get("redirectTo") ?? "/"),
   );
 
-  const attempt = await attemptLogin(password, await clientIp());
-  if (!attempt.ok) {
-    return { error: attempt.error };
+  let token: string;
+  let destination = redirectTo;
+  try {
+    const attempt = await attemptLogin(password, await clientIp());
+    if (!attempt.ok) return { error: attempt.error };
+    token = await createSessionToken(attempt.role);
+    if (
+      attempt.role === "uploader" &&
+      isAdminPath(new URL(redirectTo, "https://llvy.invalid").pathname)
+    ) {
+      destination = "/members";
+    }
+  } catch (error) {
+    if (!(error instanceof AuthConfigurationError)) throw error;
+    return {
+      error: "로그인 설정에 문제가 있습니다. 운영자에게 문의하세요.",
+    };
   }
 
-  const token = await createSessionToken();
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -46,7 +61,7 @@ export async function login(
     maxAge: SESSION_MAX_AGE_SECONDS,
   });
 
-  redirect(redirectTo);
+  redirect(destination);
 }
 
 export async function logout(): Promise<void> {

@@ -1,5 +1,8 @@
+import { redirect } from "next/navigation";
+
 import { listMembersWithAccounts, listUnlinkedAccounts } from "@/lib/members";
 import { riotId } from "@/lib/format";
+import { getSession } from "@/lib/session";
 
 import {
   AdminFeedbackProvider,
@@ -11,6 +14,10 @@ import {
 export const dynamic = "force-dynamic";
 
 export default async function AdminPage() {
+  const session = await getSession();
+  if (!session) redirect("/login?redirectTo=%2Fadmin");
+  if (session.role !== "admin") redirect("/members");
+
   const [members, unlinked] = await Promise.all([
     listMembersWithAccounts(),
     listUnlinkedAccounts(),

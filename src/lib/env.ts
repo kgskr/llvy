@@ -1,5 +1,7 @@
 type EnvName =
   | "UPLOAD_PASSWORD"
+  | "ADMIN_PASSWORD"
+  | "AUTH_SECRET"
   | "POSTGRES_URL"
   | "POSTGRES_URL_NON_POOLING"
   | "POSTGRES_PRISMA_URL"
@@ -11,6 +13,8 @@ type EnvName =
 
 type RequiredServerEnv = {
   uploadPassword: string;
+  adminPassword: string;
+  authSecret: string;
   postgresUrl: string;
   blobReadWriteToken: string;
 };
@@ -44,6 +48,8 @@ function readOptionalEnv(name: EnvName): string | undefined {
 export function getServerEnv(): ServerEnv {
   return {
     uploadPassword: readRequiredEnv("UPLOAD_PASSWORD"),
+    adminPassword: readRequiredEnv("ADMIN_PASSWORD"),
+    authSecret: readRequiredEnv("AUTH_SECRET"),
     postgresUrl: readRequiredEnv("POSTGRES_URL"),
     blobReadWriteToken: readRequiredEnv("BLOB_READ_WRITE_TOKEN"),
     postgresUrlNonPooling: readOptionalEnv("POSTGRES_URL_NON_POOLING"),

@@ -5,6 +5,7 @@ import { resolveChampionNames } from "@/lib/champions";
 import { getGameDetail, type GameParticipantRow } from "@/lib/games";
 import { formatKoreaDateInput, playedAtSourceLabel } from "@/lib/game-date";
 import { parsePageNumber } from "@/lib/validation";
+import { getSession } from "@/lib/session";
 import {
   formatDate,
   formatDuration,
@@ -40,8 +41,9 @@ export default async function GameDetailPage({
   searchParams: Promise<{ page?: string | string[]; view?: string | string[] }>;
 }) {
   const [{ id }, { page, view }] = await Promise.all([params, searchParams]);
-  const game = await getGameDetail(id);
+  const [game, session] = await Promise.all([getGameDetail(id), getSession()]);
   if (!game) notFound();
+  const isAdmin = session?.role === "admin";
   const returnToExcluded =
     view === "excluded" || (!view && Boolean(game.excludedAt));
   const backHref = `/games?${returnToExcluded ? "view=excluded&" : ""}page=${parsePageNumber(page)}`;
@@ -85,7 +87,7 @@ export default async function GameDetailPage({
               이 경기는 기본 목록과 모임원 전적에 포함되지 않습니다. 원본
               리플레이와 참가자 기록은 보존되어 있습니다.
             </p>
-            <GameVisibilityForm gameId={game.id} excluded />
+            {isAdmin ? <GameVisibilityForm gameId={game.id} excluded /> : null}
           </section>
         ) : null}
         {teams.map(({ team, result, players }) =>
@@ -108,21 +110,23 @@ export default async function GameDetailPage({
             championNames={championNames}
           />
         ) : null}
-        <section className="card stack">
-          <h2>경기 날짜 수정</h2>
-          <p className="muted">
-            원본 날짜: {formatDate(game.originalPlayedAt)} (
-            {playedAtSourceLabel(game.originalPlayedAtSource)})
-          </p>
-          <GameDateForm
-            key={`${game.playedAt.toISOString()}:${Boolean(game.playedAtOverride)}`}
-            gameId={game.id}
-            currentValue={formatKoreaDateInput(game.playedAt)}
-            originalValue={formatKoreaDateInput(game.originalPlayedAt)}
-            hasOverride={Boolean(game.playedAtOverride)}
-          />
-        </section>
-        {!game.excludedAt ? (
+        {isAdmin ? (
+          <section className="card stack">
+            <h2>경기 날짜 수정</h2>
+            <p className="muted">
+              원본 날짜: {formatDate(game.originalPlayedAt)} (
+              {playedAtSourceLabel(game.originalPlayedAtSource)})
+            </p>
+            <GameDateForm
+              key={`${game.playedAt.toISOString()}:${Boolean(game.playedAtOverride)}`}
+              gameId={game.id}
+              currentValue={formatKoreaDateInput(game.playedAt)}
+              originalValue={formatKoreaDateInput(game.originalPlayedAt)}
+              hasOverride={Boolean(game.playedAtOverride)}
+            />
+          </section>
+        ) : null}
+        {isAdmin && !game.excludedAt ? (
           <section className="card stack">
             <h2>경기 제외</h2>
             <p className="muted">

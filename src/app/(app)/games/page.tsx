@@ -4,6 +4,7 @@ import { countGames, listGames } from "@/lib/games";
 import { formatDate, formatDuration, teamLabel } from "@/lib/format";
 import { playedAtSourceLabel } from "@/lib/game-date";
 import { parsePageNumber } from "@/lib/validation";
+import { getSession } from "@/lib/session";
 
 import { GameFeedbackProvider, GameVisibilityForm } from "./forms";
 
@@ -19,7 +20,11 @@ export default async function GamesPage({
   const { page: requestedPage, view } = await searchParams;
   const visibility = view === "excluded" ? "excluded" : "active";
   const excluded = visibility === "excluded";
-  const total = await countGames(visibility);
+  const [total, session] = await Promise.all([
+    countGames(visibility),
+    getSession(),
+  ]);
+  const canRestore = excluded && session?.role === "admin";
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const page = Math.min(parsePageNumber(requestedPage), pageCount);
   const games = await listGames(PAGE_SIZE, (page - 1) * PAGE_SIZE, visibility);
@@ -74,7 +79,7 @@ export default async function GamesPage({
                   <th>승리 팀</th>
                   <th>인원</th>
                   <th />
-                  {excluded ? <th>복구</th> : null}
+                  {canRestore ? <th>복구</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -97,7 +102,7 @@ export default async function GamesPage({
                         상세 →
                       </Link>
                     </td>
-                    {excluded ? (
+                    {canRestore ? (
                       <td>
                         <GameVisibilityForm gameId={game.id} excluded />
                       </td>

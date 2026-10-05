@@ -1,12 +1,13 @@
-import { verifyPassword } from "./auth";
+import { authenticatePassword, type SessionRole } from "./auth";
 import type { LoginThrottleLimits } from "./limits";
 import { checkLoginThrottle } from "./login-throttle";
 
-export type LoginAttempt = { ok: true } | { ok: false; error: string };
+export type LoginAttempt =
+  { ok: true; role: SessionRole } | { ok: false; error: string };
 
 export const THROTTLED_MESSAGE =
   "시도가 너무 많습니다. 잠시 후 다시 시도해 주세요.";
-export const WRONG_PASSWORD_MESSAGE = "비밀번호가 올바르지 않습니다.";
+export const WRONG_PASSWORD_MESSAGE = "접근 키가 올바르지 않습니다.";
 
 const FAILED_LOGIN_DELAY_MS = 400;
 
@@ -26,7 +27,7 @@ export async function attemptLogin(
   overrides: {
     limits?: LoginThrottleLimits;
     throttle?: typeof checkLoginThrottle;
-    verify?: typeof verifyPassword;
+    verify?: typeof authenticatePassword;
     failedDelayMs?: number;
   } = {},
 ): Promise<LoginAttempt> {
@@ -35,8 +36,9 @@ export async function attemptLogin(
     return { ok: false, error: THROTTLED_MESSAGE };
   }
 
-  const verify = overrides.verify ?? verifyPassword;
-  if (!password || !verify(password)) {
+  const verify = overrides.verify ?? authenticatePassword;
+  const role = password ? verify(password) : null;
+  if (!role) {
     const delayMs = overrides.failedDelayMs ?? FAILED_LOGIN_DELAY_MS;
     if (delayMs > 0) {
       await new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -44,5 +46,5 @@ export async function attemptLogin(
     return { ok: false, error: WRONG_PASSWORD_MESSAGE };
   }
 
-  return { ok: true };
+  return { ok: true, role };
 }

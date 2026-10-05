@@ -33,6 +33,8 @@ beforeAll(migrateTestDatabase, 30_000);
 beforeEach(async () => {
   await resetTestDatabase();
   vi.stubEnv("UPLOAD_PASSWORD", PASSWORD);
+  vi.stubEnv("ADMIN_PASSWORD", "separate-admin-key");
+  vi.stubEnv("AUTH_SECRET", "independent-signing-secret-at-least-32-bytes");
 });
 afterEach(() => vi.unstubAllEnvs());
 afterAll(() => client.close());
@@ -86,14 +88,14 @@ describe("attemptLogin", () => {
   it("accepts the correct password and rejects a wrong one", async () => {
     expect(
       await attemptLogin(PASSWORD, "198.51.100.7", { failedDelayMs: 0 }),
-    ).toEqual({ ok: true });
+    ).toEqual({ ok: true, role: "uploader" });
     expect(
       await attemptLogin("wrong", "198.51.100.7", { failedDelayMs: 0 }),
     ).toEqual({ ok: false, error: WRONG_PASSWORD_MESSAGE });
   });
 
   it("never verifies a password after that IP reaches its limit", async () => {
-    const verify = vi.fn(() => false);
+    const verify = vi.fn(() => null);
     for (let i = 0; i < LIMITS.perClientAttempts; i += 1) {
       await attemptLogin("guess", "198.51.100.7", {
         limits: LIMITS,
@@ -116,6 +118,28 @@ describe("attemptLogin", () => {
         limits: LIMITS,
         failedDelayMs: 0,
       }),
-    ).toEqual({ ok: true });
+    ).toEqual({ ok: true, role: "uploader" });
+  });
+
+  it("uses one trusted-IP budget for successful logins with either role", async () => {
+    for (const [password, role] of [
+      [PASSWORD, "uploader"],
+      ["separate-admin-key", "admin"],
+      [PASSWORD, "uploader"],
+    ]) {
+      expect(
+        await attemptLogin(password, "198.51.100.7", { limits: LIMITS }),
+      ).toEqual({ ok: true, role });
+    }
+    expect(
+      await attemptLogin("separate-admin-key", "198.51.100.7", {
+        limits: LIMITS,
+      }),
+    ).toEqual({ ok: false, error: THROTTLED_MESSAGE });
+    expect(
+      await attemptLogin("separate-admin-key", "203.0.113.9", {
+        limits: LIMITS,
+      }),
+    ).toEqual({ ok: true, role: "admin" });
   });
 });

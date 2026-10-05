@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  assertSession: vi.fn(),
+  assertAdmin: vi.fn(),
   createMember: vi.fn(),
   updateMember: vi.fn(),
   linkAccount: vi.fn(),
@@ -17,8 +17,9 @@ vi.mock("@/lib/members", () => ({
   unlinkAccount: mocks.unlinkAccount,
 }));
 vi.mock("@/lib/session", () => ({
-  assertSession: mocks.assertSession,
+  assertAdmin: mocks.assertAdmin,
   UnauthorizedError: class UnauthorizedError extends Error {},
+  ForbiddenError: class ForbiddenError extends Error {},
 }));
 
 import { UnauthorizedError } from "@/lib/session";
@@ -40,7 +41,7 @@ function form(values: Record<string, string>) {
 
 beforeEach(() => {
   vi.resetAllMocks();
-  mocks.assertSession.mockResolvedValue(undefined);
+  mocks.assertAdmin.mockResolvedValue(undefined);
   mocks.createMember.mockResolvedValue(MEMBER_ID);
   mocks.updateMember.mockResolvedValue(true);
   mocks.linkAccount.mockResolvedValue(true);
@@ -140,7 +141,7 @@ describe("member administration actions", () => {
   });
 
   it("rejects all unauthenticated mutations without a database write", async () => {
-    mocks.assertSession.mockRejectedValue(new UnauthorizedError());
+    mocks.assertAdmin.mockRejectedValue(new UnauthorizedError());
     const data = form({
       memberId: MEMBER_ID,
       accountId: ACCOUNT_ID,

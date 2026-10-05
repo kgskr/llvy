@@ -11,6 +11,7 @@ import {
 import { playedAtSourceLabel } from "@/lib/game-date";
 import { getMemberHistory } from "@/lib/member-history";
 import { parsePageNumber } from "@/lib/validation";
+import { getSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -41,8 +42,12 @@ export default async function MemberHistoryPage({
     parsePageNumber(requestedPage),
     Math.floor(Number.MAX_SAFE_INTEGER / PAGE_SIZE),
   );
-  const history = await getMemberHistory(id, PAGE_SIZE, (page - 1) * PAGE_SIZE);
+  const [history, session] = await Promise.all([
+    getMemberHistory(id, PAGE_SIZE, (page - 1) * PAGE_SIZE),
+    getSession(),
+  ]);
   if (!history) notFound();
+  const isAdmin = session?.role === "admin";
   const pageCount = Math.max(
     1,
     Math.ceil(history.stats.totalGames / PAGE_SIZE),
@@ -164,7 +169,7 @@ export default async function MemberHistoryPage({
             계정을 연결하면 이미 저장된 경기의 전적도 표시됩니다.
           </p>
         )}
-        <Link href="/admin">계정 연결 관리 →</Link>
+        {isAdmin ? <Link href="/admin">계정 연결 관리 →</Link> : null}
       </section>
 
       <section className="stack">
@@ -209,7 +214,11 @@ export default async function MemberHistoryPage({
                       </td>
                       <td>
                         {game.ambiguous ? (
-                          <Link href="/admin">계정 중복 연결 확인</Link>
+                          isAdmin ? (
+                            <Link href="/admin">계정 중복 연결 확인</Link>
+                          ) : (
+                            <span>계정 중복 연결 확인 필요</span>
+                          )
                         ) : (
                           <>
                             {game.champion

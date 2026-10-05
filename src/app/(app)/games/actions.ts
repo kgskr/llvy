@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 
 import { validateGameDateInput } from "@/lib/game-date";
 import { setGameExcluded, setGamePlayedAt } from "@/lib/games";
-import { assertSession, UnauthorizedError } from "@/lib/session";
+import { assertAdmin, ForbiddenError, UnauthorizedError } from "@/lib/session";
 import { isUuid } from "@/lib/validation";
 
 type GameActionResult = { status: "success" | "error"; message: string };
@@ -14,9 +14,12 @@ async function runGameAction(
   action: () => Promise<GameActionResult>,
 ): Promise<GameActionResult> {
   try {
-    await assertSession();
+    await assertAdmin();
     return await action();
   } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return { status: "error", message: "관리자 권한이 필요합니다." };
+    }
     if (error instanceof UnauthorizedError) {
       return {
         status: "error",

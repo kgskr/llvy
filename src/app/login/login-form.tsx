@@ -13,7 +13,7 @@ export function LoginForm({ redirectTo }: { redirectTo: string }) {
   return (
     <form action={formAction} className="login-form">
       <input type="hidden" name="redirectTo" value={redirectTo} />
-      <label htmlFor="password">공유 비밀번호</label>
+      <label htmlFor="password">접근 키</label>
       <input
         id="password"
         name="password"

@@ -1,14 +1,18 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { SESSION_COOKIE, verifySessionToken } from "@/lib/auth";
+import { SESSION_COOKIE, isAdminPath, readSessionToken } from "@/lib/auth";
 
 export async function proxy(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
-  const authed = await verifySessionToken(token);
-
-  if (authed) return NextResponse.next();
-
+  const session = await readSessionToken(token);
   const { pathname, search } = request.nextUrl;
+
+  if (session) {
+    if (session.role !== "admin" && isAdminPath(pathname)) {
+      return NextResponse.redirect(new URL("/members", request.url));
+    }
+    return NextResponse.next();
+  }
 
   // API routes get a 401 rather than an HTML redirect so fetch() callers can
   // handle it (e.g. the Blob upload-token route and the process route).

@@ -1,51 +1,66 @@
 /**
- * Shared-password session auth. Edge-compatible (Web Crypto only, no Node APIs,
- * no `server-only`) because it is used from the proxy as well as server actions.
- *
- * The session signing key is HKDF-derived from a dedicated AUTH_SECRET when set,
- * otherwise from UPLOAD_PASSWORD. Using AUTH_SECRET is recommended: it decouples
- * the signing key from the login password, so a leaked session token can't be
- * used to recover the password offline. Rotating either invalidates sessions.
+ * Shared-key role auth using Web Crypto, shared by Proxy and server actions.
+ * AUTH_SECRET is always server-only and independent of both login keys.
+ * Each role's signing key is bound to its current login key for session revocation.
  */
 
 export const SESSION_COOKIE = "llvy_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 const encoder = new TextEncoder();
-const PAYLOAD_PREFIX = "v2.";
-const HKDF_SALT = "llvy-session-hkdf-v2";
+const HKDF_SALT = "llvy-session-hkdf-v3";
 const HKDF_INFO = "llvy-session-hmac";
 
-function getPassword(): string {
-  const secret = process.env.UPLOAD_PASSWORD;
-  if (!secret) {
-    throw new Error("Missing required environment variable: UPLOAD_PASSWORD");
+export type SessionRole = "uploader" | "admin";
+export type VerifiedSession = { role: SessionRole; issuedAt: number };
+
+export class AuthConfigurationError extends Error {
+  constructor() {
+    super("Invalid authentication configuration. Check the required secrets.");
+    this.name = "AuthConfigurationError";
   }
-  return secret;
 }
 
-/** Dedicated signing secret if provided, else the login password. */
-function getSigningSecret(): string {
-  return process.env.AUTH_SECRET?.trim() || getPassword();
+function getAuthConfig() {
+  const uploader = process.env.UPLOAD_PASSWORD;
+  const admin = process.env.ADMIN_PASSWORD;
+  const secret = process.env.AUTH_SECRET?.trim();
+  if (
+    !uploader?.trim() ||
+    !admin?.trim() ||
+    uploader === admin ||
+    !secret ||
+    encoder.encode(secret).length < 32 ||
+    secret === uploader ||
+    secret === admin
+  ) {
+    throw new AuthConfigurationError();
+  }
+  return { secret, passwords: { uploader, admin } };
 }
 
-const signingKeyCache = new Map<string, Promise<CryptoKey>>();
+// At most two entries, so rotations do not retain an unbounded set of secrets.
+const signingKeyCache = new Map<
+  SessionRole,
+  { secret: string; password: string; key: Promise<CryptoKey> }
+>();
 
-function getSigningKey(): Promise<CryptoKey> {
-  const secret = getSigningSecret();
-  const password = getPassword();
-  const cacheKey = JSON.stringify([secret, password]);
-  let key = signingKeyCache.get(cacheKey);
-  if (!key) {
-    key = deriveSigningKey(secret, password);
-    signingKeyCache.set(cacheKey, key);
+function getSigningKey(role: SessionRole): Promise<CryptoKey> {
+  const { secret, passwords } = getAuthConfig();
+  const password = passwords[role];
+  const cached = signingKeyCache.get(role);
+  if (cached?.secret === secret && cached.password === password) {
+    return cached.key;
   }
+  const key = deriveSigningKey(secret, password, role);
+  signingKeyCache.set(role, { secret, password, key });
   return key;
 }
 
 async function deriveSigningKey(
   secret: string,
   password: string,
+  role: SessionRole,
 ): Promise<CryptoKey> {
   const ikm = await crypto.subtle.importKey(
     "raw",
@@ -58,9 +73,7 @@ async function deriveSigningKey(
     {
       name: "HKDF",
       hash: "SHA-256",
-      // Bind sessions to the current shared password even with a dedicated
-      // signing secret. Rotating either credential must revoke old sessions.
-      salt: encoder.encode(`${HKDF_SALT}:${password}`),
+      salt: encoder.encode(JSON.stringify([HKDF_SALT, role, password])),
       info: encoder.encode(HKDF_INFO),
     },
     ikm,
@@ -97,15 +110,22 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** Constant-time check of a submitted password against UPLOAD_PASSWORD. */
-export function verifyPassword(input: string): boolean {
-  return timingSafeEqual(input, getPassword());
+/** The server selects the role; caller-supplied roles never participate. */
+export function authenticatePassword(input: string): SessionRole | null {
+  const { passwords } = getAuthConfig();
+  const uploader = timingSafeEqual(input, passwords.uploader);
+  const admin = timingSafeEqual(input, passwords.admin);
+  if (admin) return "admin";
+  return uploader ? "uploader" : null;
 }
 
 /** Create a signed session token to store in the session cookie. */
-export async function createSessionToken(): Promise<string> {
-  const payload = `${PAYLOAD_PREFIX}${Date.now()}.${crypto.randomUUID()}`;
-  const key = await getSigningKey();
+export async function createSessionToken(role: SessionRole): Promise<string> {
+  if (role !== "uploader" && role !== "admin") {
+    throw new Error("Invalid session role");
+  }
+  const payload = `v3.${role}.${Date.now()}.${crypto.randomUUID()}`;
+  const key = await getSigningKey(role);
   const signature = await crypto.subtle.sign(
     "HMAC",
     key,
@@ -114,41 +134,61 @@ export async function createSessionToken(): Promise<string> {
   return `${payload}.${toBase64Url(signature)}`;
 }
 
-/** Verify a session token's signature. Returns false for any malformed input. */
+/** Read a role only after verifying its entire signed payload and current key. */
+export async function readSessionToken(
+  token: string | undefined | null,
+): Promise<VerifiedSession | null> {
+  if (!token || token.length > 256) return null;
+  const parts = token.split(".");
+  if (parts.length !== 5) return null;
+  const [version, role, timestamp, nonce, signaturePart] = parts;
+  if (
+    version !== "v3" ||
+    (role !== "uploader" && role !== "admin") ||
+    !/^\d{1,16}$/.test(timestamp) ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+      nonce,
+    ) ||
+    !/^[A-Za-z0-9_-]{43}$/.test(signaturePart)
+  ) {
+    return null;
+  }
+
+  const issuedAt = Number(timestamp);
+  const now = Date.now();
+  if (
+    !Number.isSafeInteger(issuedAt) ||
+    issuedAt > now + 60_000 ||
+    now - issuedAt > SESSION_MAX_AGE_SECONDS * 1000
+  ) {
+    return null;
+  }
+
+  try {
+    const signature = fromBase64Url(signaturePart);
+    // Reject base64 aliases so one session has one identity for upload budgets.
+    if (toBase64Url(signature.buffer) !== signaturePart) return null;
+    const key = await getSigningKey(role);
+    const valid = await crypto.subtle.verify(
+      "HMAC",
+      key,
+      signature,
+      encoder.encode(parts.slice(0, 4).join(".")),
+    );
+    return valid ? { role, issuedAt } : null;
+  } catch (error) {
+    if (error instanceof AuthConfigurationError) return null;
+    throw error;
+  }
+}
+
+/** Boolean compatibility for upload handlers and existing authenticated reads. */
 export async function verifySessionToken(
   token: string | undefined | null,
 ): Promise<boolean> {
-  if (!token) return false;
-  const lastDot = token.lastIndexOf(".");
-  if (lastDot <= 0) return false;
+  return (await readSessionToken(token)) !== null;
+}
 
-  const payload = token.slice(0, lastDot);
-  const signaturePart = token.slice(lastDot + 1);
-  if (!payload.startsWith(PAYLOAD_PREFIX)) return false;
-
-  let signature: Uint8Array<ArrayBuffer>;
-  try {
-    signature = fromBase64Url(signaturePart);
-  } catch {
-    return false;
-  }
-
-  const key = await getSigningKey();
-  const validSignature = await crypto.subtle.verify(
-    "HMAC",
-    key,
-    signature,
-    encoder.encode(payload),
-  );
-  if (!validSignature) return false;
-
-  // Enforce expiry from the signed timestamp (payload = `v2.<ms>.<nonce>`), so a leaked
-  // token is not valid forever. Reject non-finite, far-future, or aged tokens.
-  const issuedAt = Number(payload.split(".")[1]);
-  if (!Number.isFinite(issuedAt)) return false;
-  const now = Date.now();
-  if (issuedAt > now + 60_000) return false;
-  if (now - issuedAt > SESSION_MAX_AGE_SECONDS * 1000) return false;
-
-  return true;
+export function isAdminPath(pathname: string): boolean {
+  return pathname === "/admin" || pathname.startsWith("/admin/");
 }

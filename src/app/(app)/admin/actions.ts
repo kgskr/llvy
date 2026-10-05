@@ -8,7 +8,7 @@ import {
   unlinkAccount,
   updateMember,
 } from "@/lib/members";
-import { assertSession, UnauthorizedError } from "@/lib/session";
+import { assertAdmin, ForbiddenError, UnauthorizedError } from "@/lib/session";
 import { isUuid, validateMemberInput } from "@/lib/validation";
 
 type AdminActionResult = { status: "success" | "error"; message: string };
@@ -18,9 +18,12 @@ async function runAdminAction(
   action: () => Promise<AdminActionResult>,
 ): Promise<AdminActionResult> {
   try {
-    await assertSession();
+    await assertAdmin();
     return await action();
   } catch (error) {
+    if (error instanceof ForbiddenError) {
+      return { status: "error", message: "관리자 권한이 필요합니다." };
+    }
     if (error instanceof UnauthorizedError) {
       return {
         status: "error",

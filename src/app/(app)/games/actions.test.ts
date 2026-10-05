@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  assertSession: vi.fn(),
+  assertAdmin: vi.fn(),
   setGameExcluded: vi.fn(),
   setGamePlayedAt: vi.fn(),
   revalidatePath: vi.fn(),
@@ -13,8 +13,9 @@ vi.mock("@/lib/games", () => ({
   setGamePlayedAt: mocks.setGamePlayedAt,
 }));
 vi.mock("@/lib/session", () => ({
-  assertSession: mocks.assertSession,
+  assertAdmin: mocks.assertAdmin,
   UnauthorizedError: class UnauthorizedError extends Error {},
+  ForbiddenError: class ForbiddenError extends Error {},
 }));
 
 import { UnauthorizedError } from "@/lib/session";
@@ -41,7 +42,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-10-03T03:00:00.000Z"));
-  mocks.assertSession.mockResolvedValue(undefined);
+  mocks.assertAdmin.mockResolvedValue(undefined);
   mocks.setGameExcluded.mockResolvedValue(true);
   mocks.setGamePlayedAt.mockResolvedValue(true);
 });
@@ -59,7 +60,7 @@ function expectHistoryRevalidated() {
 
 describe("authenticated game mutations", () => {
   it("blocks every unauthenticated action before any database write", async () => {
-    mocks.assertSession.mockRejectedValue(new UnauthorizedError());
+    mocks.assertAdmin.mockRejectedValue(new UnauthorizedError());
     const data = form({
       gameId: GAME_ID,
       excluded: "true",

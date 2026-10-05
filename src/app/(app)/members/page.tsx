@@ -2,11 +2,16 @@ import Link from "next/link";
 
 import { riotId } from "@/lib/format";
 import { listMembersWithAccounts } from "@/lib/members";
+import { getSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
 export default async function MembersPage() {
-  const members = await listMembersWithAccounts();
+  const [members, session] = await Promise.all([
+    listMembersWithAccounts(),
+    getSession(),
+  ]);
+  const isAdmin = session?.role === "admin";
 
   return (
     <section className="stack">
@@ -17,14 +22,16 @@ export default async function MembersPage() {
             연결된 라이엇 계정의 전적을 한곳에서 확인하세요.
           </p>
         </div>
-        <Link href="/admin" className="button button-secondary">
-          모임원·계정 관리
-        </Link>
+        {isAdmin ? (
+          <Link href="/admin" className="button button-secondary">
+            모임원·계정 관리
+          </Link>
+        ) : null}
       </div>
       {members.length === 0 ? (
         <div className="card empty-state">
           <p>아직 등록된 모임원이 없습니다.</p>
-          <Link href="/admin">모임원 추가하기 →</Link>
+          {isAdmin ? <Link href="/admin">모임원 추가하기 →</Link> : null}
         </div>
       ) : (
         <div className="member-grid">
