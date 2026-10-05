@@ -1,30 +1,31 @@
 ## Why
 
-Codex Security repository scan `ed4196b0-0a96-410c-a233-aa894da68f5f` completed with 3 reportable findings: two medium-severity controls around login throttling and replay ingestion resource limits, plus one low-severity Blob cleanup authorization issue. These findings affect the MVP's core trust boundaries, so they should be tracked as an explicit OpenSpec hardening change before implementation.
+Codex Security scan `ed4196b0-0a96-410c-a233-aa894da68f5f` reported three issues in the initial MVP: forwarded-header login throttle bypass, unbound Blob cleanup, and excessive replay-derived database work. This change records the current implementation of those controls and the subsequent shared-budget and abandoned-upload cleanup additions.
 
 ## What Changes
 
-- Harden the shared-password login throttle so attacker-controlled forwarded headers cannot partition rate-limit buckets.
-- Bind `/api/process` Blob fetch and cleanup to a server-tracked pending upload or equivalent nonce, so caller-supplied known Blob URLs are not deleted with app Blob authority.
-- Add semantic replay parsing and ingestion budgets for `statsJson` participant count, nested/raw JSON size, field size, and per-upload DB work before starting expensive transactions.
-- Reduce persistence of arbitrary replay-controlled raw participant JSON where a normalized allowlist is sufficient.
-- Add regression tests for the three reported scan findings.
-- Leave the scan-suppressed slash-backslash redirect and direct-upload orphan lifecycle findings out of required scope, except where the Blob ownership design naturally improves orphan handling.
+- Enforce login attempts per Vercel-normalized client IP with shared Postgres fixed-window counters; reject production login when trusted identity is unavailable.
+- Bind Blob token issuance and `/api/process` fetch/cleanup to Postgres upload reservations with an unguessable id and nonce.
+- Limit reservations to ten per session and fifty app-wide per 24-hour window.
+- Reconcile expired uploads through a daily authenticated maintenance route, preserving every Blob referenced by a stored game.
+- Bound participant count, input JSON size/depth, retained diagnostic fields, and ingestion work before transactions.
+- Cover identity selection, atomic budgets, binding replay, safe deletion, parser limits, and cleanup recovery with regressions.
 
 ## Capabilities
 
 ### New Capabilities
-- `access-control-hardening`: login and shared-password security controls, including trusted rate-limit identity and bypass-resistant throttling.
-- `blob-processing-ownership`: upload-processing ownership, pending-upload binding, and safe Blob cleanup behavior for `/api/process`.
-- `replay-ingestion-resource-limits`: parser, replay metadata, transaction, and storage limits for replay ingestion.
+- `access-control-hardening`: verified-client identity, shared login throttling, and missing-identity rejection.
+- `blob-processing-ownership`: pending upload binding, reservation budgets, consumed-binding protection, and expired-upload reconciliation.
+- `replay-ingestion-resource-limits`: parser, transaction, and diagnostic storage budgets.
 
 ### Modified Capabilities
-<!-- Existing live specs are not archived under openspec/specs yet; this change adds follow-up hardening capabilities instead of mutating the completed replay-ingestion-mvp artifacts. -->
+
+The initial MVP is not archived into live `openspec/specs` yet. Its current documents describe the same bounded diagnostics and identity rules so the change artifacts do not contradict each other.
 
 ## Impact
 
-- **Affected code**: `src/app/login/actions.ts`, `src/lib/rate-limit.ts`, `src/app/api/blob/upload/route.ts`, `src/app/api/process/route.ts`, `src/lib/rofl/parser.ts`, `src/lib/ingest.ts`, `src/db/schema.ts`, and related tests.
-- **Data model**: may require a pending-upload table or signed upload token metadata, plus possible schema changes if raw replay JSON is reduced or bounded.
-- **APIs**: `/api/blob/upload` and `/api/process` request/response contracts may gain an upload identifier, nonce, or ownership token.
-- **Validation**: targeted tests should reproduce the scan cases: rotated `x-forwarded-for`, same-store Blob URL cleanup, and oversized `statsJson` participant arrays under the byte cap.
-- **Operational note**: live Vercel Blob deletion/readback and Postgres threshold behavior still require staging validation with disposable resources.
+- **Code**: login actions, `login-throttle.ts`, `trusted-client-ip.ts`, `request-budget.ts`, upload/token/process/maintenance routes, pending-upload store, expired-upload cleanup, parser, ingestion, auth, schema, and tests. The process-local `rate-limit.ts` is removed.
+- **Data**: Postgres `pending_uploads`, `request_budgets`, and the cleanup claim timestamp.
+- **API**: `/api/uploads` returns the binding and access mode; token/process requests present it. The maintenance endpoint uses `CRON_SECRET` instead of a session cookie.
+- **Operations**: deploy the matching Drizzle migrations, environment variables, and daily Cron configuration. Current local code is not evidence that these later changes are deployed.
+- **Validation**: local PostgreSQL-compatible integration tests and mocked Blob operations cover the controls. Earlier live upload/cleanup evidence is retained in the dated deployment record; current Cron and shared-budget production behavior still needs separate verification.

@@ -23,11 +23,11 @@ The system SHALL validate parser output against configured ingestion budgets bef
 - **THEN** ingestion returns the duplicate result without parsing unbounded participant data or performing participant DB work
 
 ### Requirement: Persist only bounded replay-derived diagnostic JSON
-The system SHALL NOT persist arbitrary unbounded participant raw JSON. If diagnostic replay-derived JSON is retained, it MUST be reduced to a bounded allowlist or rejected when it exceeds configured size and depth limits.
+The system SHALL NOT persist arbitrary unbounded participant raw JSON. Retained participant diagnostics SHALL use a bounded scalar allowlist; unknown fields, nested values, and strings longer than 256 characters SHALL be omitted. Game diagnostics SHALL use four known top-level scalar fields. Input JSON exceeding size and depth limits SHALL be rejected before storage.
 
 #### Scenario: Raw stats are bounded before storage
 - **WHEN** a participant record is prepared for storage
-- **THEN** any retained raw stats payload is either normalized to an allowed bounded shape or omitted
+- **THEN** any retained raw stats payload is reduced to the configured bounded scalar allowlist
 
 #### Scenario: Oversized raw stats do not reach JSONB storage
 - **WHEN** a participant's raw replay stats exceed the configured raw JSON budget

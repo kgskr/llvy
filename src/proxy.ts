@@ -27,5 +27,7 @@ export const config = {
   // Protect everything except the login page, Next internals, and the favicon.
   // Exclusions are anchored to a path-segment boundary so e.g. /login-foo is
   // NOT accidentally excluded from auth.
-  matcher: ["/((?!login$|login/|_next/static|_next/image|favicon\\.ico$).*)"],
+  matcher: [
+    "/((?!login$|login/|api/maintenance/uploads$|_next/static|_next/image|favicon\\.ico$).*)",
+  ],
 };

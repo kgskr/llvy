@@ -1,122 +1,87 @@
 ## Context
 
-Codex Security scan `ed4196b0-0a96-410c-a233-aa894da68f5f` reported three findings against the current LLVY MVP:
+Codex Security scan `ed4196b0-0a96-410c-a233-aa894da68f5f` originally reported raw forwarded-header login throttling, unbound Blob cleanup, and unbounded replay participant work. Those are historical scan observations, not descriptions of the current implementation.
 
-- `src/app/login/actions.ts` derives the login rate-limit key from raw `x-forwarded-for`, so rotating that header can create fresh buckets before password verification.
-- `/api/process` accepts a caller-supplied `blobUrl` and passes the same URL to Blob deletion during duplicate/error cleanup, without proving that URL is the current upload's orphan.
-- `parseStats()` accepts any non-empty `statsJson` array. A crafted authenticated replay can keep the file under the byte cap while creating excessive parser, transaction, JSONB storage, and data-integrity work.
-
-The current app uses a single shared password, direct Vercel Blob uploads, synchronous `/api/process` ingestion, and Vercel Postgres/Blob. There is no per-user account model, queue, or background worker in the MVP.
+The current local app uses shared-password login, signed session cookies, direct Vercel Blob upload, synchronous processing, and Postgres-backed upload bindings and request budgets. A daily maintenance route reconciles expired uploads. There are no per-member login accounts or ingestion queue. Production evidence from 2026-10-04 is recorded separately in `docs/validation/2026-10-04-production-deployment.md`; it does not establish deployment of later local changes.
 
 ## Goals / Non-Goals
 
 **Goals:**
-- Make login throttling resistant to attacker-controlled forwarded-header partitioning.
-- Ensure `/api/process` only fetches and deletes Blob objects that belong to a fresh pending upload issued by this app.
-- Reject replay metadata that exceeds supported MVP game shape or configured parser/ingestion budgets before expensive DB work begins.
-- Add regression tests for the three reported findings.
-- Preserve the current MVP user experience: shared-password login, direct Blob upload, synchronous processing, and game list/detail flows.
+- Limit login attempts by platform-verified IP using atomic counters shared across server instances.
+- Bind Blob token issuance, processing, and deletion to a server-reserved upload path and secret nonce.
+- Bound parser and transaction work before database writes.
+- Bound daily upload reservations and reconcile abandoned uploads without deleting committed replay originals.
+- Preserve shared-password login and direct-upload/synchronous-ingestion flows.
 
 **Non-Goals:**
-- Introduce member-specific login accounts, roles, or admin/user authorization tiers.
-- Replace synchronous ingestion with a queue or worker.
-- Implement a broad file quarantine/lifecycle manager beyond the ownership checks needed for safe processing and cleanup.
-- Treat the scan-suppressed slash-backslash redirect and direct-upload orphan lifecycle candidates as required fixes in this change.
+- Per-member authentication, roles, or authorization tiers.
+- Queued ingestion or automatic retry of abandoned processing.
+- A global login bucket that allows one IP to lock out other clients.
+- Arbitrary Blob cleanup outside server-reserved pending-upload paths.
 
 ## Decisions
 
-### 1. Login throttling uses a non-spoofable baseline key
+### 1. Login throttling uses a platform-verified IP and shared Postgres counters
 
-The login flow SHALL stop using raw `x-forwarded-for` as the sole limiter partition. For the current small-club MVP, the safest baseline is a global pre-auth login bucket that is always enforced, optionally combined with a trusted client identity only when the deployment proves a non-spoofable source.
+`trustedClientIp()` uses a valid IP from `x-vercel-forwarded-for` only when `VERCEL=1`. Raw `x-forwarded-for` is ignored. Production without a trusted identity rejects login before password verification; it does not fall back to a global bucket. Non-production outside Vercel uses the fixed `local-development` identity.
 
-Rationale:
-- A global bucket is conservative but reliable: header rotation cannot create a fresh key.
-- The app has one shared password and low expected login volume, so temporary global lockout is an acceptable trade-off compared with bypassable throttling.
-- A future production hardening step can move the same keying model to Vercel KV/Upstash or another shared store without changing the user-facing contract.
+`checkLoginThrottle()` consumes an atomic `request_budgets` counter keyed by a SHA-256 hash of the client IP. The default permits ten login attempts per 60-second fixed window. All admitted attempts, including successful and empty-password submissions, consume the budget. An exhausted budget prevents password verification. Wrong-password responses have a 400ms delay. One IP's exhausted budget does not exhaust another IP's budget.
 
-Alternatives considered:
-- Trust `x-forwarded-for`: rejected because it is the reported issue.
-- Remove IP-style partitioning entirely and keep only the 400ms failed-login delay: rejected because it weakens brute-force protection.
-- Add per-member accounts immediately: rejected as outside the MVP scope.
+A global login lockout was replaced with per-IP counters to avoid cross-client lockouts. The trade-off is that distinct actual IPs receive separate budgets. Deployment correctness depends on Vercel normalizing the trusted header; local tests do not prove ingress behavior on an arbitrary host.
 
-### 2. Blob processing requires a pending-upload binding
+### 2. Blob processing requires a Postgres pending-upload binding
 
-The upload token route SHALL create a server-side pending upload record or signed pending-upload token containing:
+Authenticated `POST /api/uploads` accepts a `.rofl` filename, consumes upload reservation budgets, and creates a `pending_uploads` row. Its response is `{uploadId, nonce, pathname, access}`. The nonce has 256 bits of randomness, is returned once, and is stored only as a SHA-256 hash. The path is `replays/<uploadId>.rofl`. Upload-token issuance remains in `/api/blob/upload`, which verifies the session, pending state, expiry, nonce, and exact pathname. Random suffixes and overwrites are disabled. Maximum file size is 64MiB.
 
-- an unguessable upload id,
-- an unguessable cleanup/process nonce,
-- the expected Blob pathname or exact URL constraint,
-- creation/expiry timestamps,
-- processing state (`pending`, `processing`, `processed`, `failed`, or `expired`).
+The browser sends `{uploadId, nonce, blobUrl, originalFilename, lastModified}` to `/api/process` with its session cookie. Processing validates the store origin derived from the configured Blob token and access mode, the exact reserved pathname, and the nonce before fetching or deleting. It uses a canonical URL without caller-provided query or fragment aliases. An atomic pending-to-processing claim allows only one processor. Successful and duplicate handling ends as `processed`; terminal failure ends as `failed`. Any non-pending or expired binding is rejected. Expiry is a timestamp check, not a separately persisted `expired` state.
 
-The client SHALL call `/api/process` with the Blob URL plus the pending upload id/nonce returned for that upload. `/api/process` SHALL reject Blob URLs that do not match an active pending upload. Cleanup SHALL delete only the exact Blob URL bound to that pending upload.
+Private reads send the Blob credential only to the validated canonical object. Redirects and caching are disabled. The entire download/body read has a 20-second timeout; the processing route has a 60-second execution limit. Processing downloads the entire file rather than using Range requests. Duplicate and failure cleanup target only the bound upload, and committed original Blobs are preserved when the transaction outcome or bookkeeping is uncertain.
 
-Rationale:
-- The server's Blob token is more privileged than the browser. Cleanup must be authorized against server-issued upload state, not just hostname shape.
-- Same-store public Blob URLs can be known outside the current request; hostname allowlisting is not ownership.
-- Pending state also gives a clean place to expire abandoned uploads later, though full lifecycle cleanup remains optional.
+### 3. Upload reservations use shared fixed-window budgets
 
-Alternatives considered:
-- Keep only `*.blob.vercel-storage.com` host validation: rejected because it proves destination class, not object ownership.
-- Compare only `blobUrl` path prefix: insufficient without an unguessable pending token because known URLs can still be replayed.
-- Disable cleanup entirely: reduces delete risk but leaves avoidable orphaned objects and does not prove safe processing ownership.
+Each signed session token receives ten reservations per 24-hour fixed window and the whole app receives fifty. Both counters are consumed atomically; a rejected budget transaction consumes neither. Counters live in `request_budgets`, and session identifiers are hashed. `POST /api/uploads` returns HTTP 429 on budget exhaustion. Reservations count even if the browser abandons the upload. A new login issues a new session token, while the app-wide budget still applies.
 
-### 3. Replay ingestion enforces semantic budgets before DB work
+Pending bindings expire after 30 minutes. The shared budget transaction and subsequent pending-row insertion are separate; a later insertion failure does not refund an already consumed reservation budget.
 
-The parser and ingestion pipeline SHALL enforce explicit limits independent of total file size:
+### 4. Daily maintenance reconciles expired uploads
 
-- maximum participant count for supported MVP game modes (`10` by default),
-- maximum `statsJson` string byte length,
-- maximum raw participant object serialized size,
-- maximum nested object/array depth for retained diagnostic JSON,
-- maximum DB rows/account upserts per replay.
+`vercel.json` schedules `GET /api/maintenance/uploads` daily at 03:00 UTC (12:00 Korea time). The proxy exempts this exact endpoint from session authentication; the route requires `Authorization: Bearer <CRON_SECRET>` and rejects requests when the configured secret is absent or mismatched.
 
-The parser SHALL reject over-budget metadata before returning participants to `ingestReplay()`. Ingestion SHALL validate the participant count again before starting a transaction. Arbitrary raw participant JSON SHALL either not be persisted or SHALL be reduced to a bounded allowlist of diagnostic fields.
+`reconcileExpiredUploads()` selects at most fifty bindings whose expiry is more than 24 hours old. Each row is atomically claimed as `cleaning` with `cleanup_claimed_at`; a claim older than ten minutes can be reclaimed. A canonical Blob URL referenced by a stored game is never deleted. Otherwise the cleanup lists the exact reserved path in the configured store, verifies its canonical URL, and deletes only that object. After successful reconciliation it deletes the pending row. Failure retains the row for retry, normally resetting it to `failed` and clearing the claim; stale claims allow recovery if resetting fails. Old request-budget rows are also removed after the same 24-hour grace.
 
-Rationale:
-- The 64MB route cap does not control nested JSON fanout, row count, or JSONB storage pressure.
-- A ten-participant cap matches the MVP's current custom-game replay assumptions and the existing tests/spec wording.
-- Enforcing the budget before transaction start avoids partially consumed DB work.
+Cleanup is scheduled, not opportunistic during reservation creation. It does not re-ingest abandoned uploads. A backlog can require multiple daily batches to drain.
 
-Alternatives considered:
-- Rely on Vercel function duration/timeouts: rejected because timeouts are a failure mode, not a control.
-- Keep raw `raw_stats` unchanged and only cap participant count: partial mitigation, but large nested raw fields can still amplify storage.
-- Store no raw metadata at all: safest, but the MVP benefits from bounded diagnostics for parser drift and future migration.
+### 5. Replay parsing and ingestion enforce semantic budgets
+
+Defaults in `src/lib/limits.ts` are injectable for tests:
+- Ten participants per replay.
+- 4MiB decoded metadata and 256KiB nested `statsJson` text, checked before parsing that text.
+- 32KiB per participant object and nesting depth four.
+- At most 256 characters in retained diagnostic string values.
+
+The parser rejects oversized metadata before returning participants. Ingestion revalidates participant and retained-JSON budgets before starting a transaction. Participant accounts are resolved in consistent identity order to reduce lock-order conflicts. Only rolled-back deadlock/serialization failures (`40P01`/`40001`) are retried; uncertain outcomes are not assumed safe to delete or retry. A known content hash short-circuits parsing and participant database work.
+
+`raw_stats` contains a bounded scalar allowlist of known fields. `raw_metadata` contains four known top-level scalar fields. Unknown or nested diagnostics and oversized retained strings are omitted; oversized input objects are rejected according to parser budgets. Full raw JSON is not stored in JSONB. The original replay file remains in Blob storage.
 
 ## Risks / Trade-offs
 
-- **Global login throttling can lock out legitimate users during a burst** -> keep limits configurable and show a clear retry message; revisit distributed/client-aware throttling after deployment ingress is verified.
-- **Pending-upload state adds schema/API complexity** -> keep the table/token minimal and expire unused pending uploads; do not introduce full per-user auth.
-- **Strict participant limits may reject unusual game modes** -> document MVP support for normal ten-player custom games and make the limit configurable for future modes.
-- **Reducing raw JSON can limit future forensic/debug value** -> retain bounded diagnostic fields and preserve parse error messages without storing arbitrary attacker-controlled payloads.
-- **Live Blob/Postgres behavior was not validated in the scan** -> run staging tests with disposable Blob objects and database rows before production rollout.
+- Verified-IP dependence means unsupported production hosting or a missing trusted header blocks login. No global fallback is implemented.
+- IP counters count successful attempts too; shared NAT clients share one login budget.
+- Session upload budgets can be renewed by logging in again; the global reservation budget remains the shared ceiling.
+- Cron configuration and `CRON_SECRET` must be deployed for scheduled cleanup. Code and mocked Blob tests alone do not prove a live scheduled execution.
+- Strict ten-participant and JSON budgets reject unsupported or oversized replay shapes.
+- Bounded diagnostics do not support reconstructing arbitrary original stats from JSONB; use the retained Blob file.
 
 ## Migration Plan
 
-1. Add configuration constants for login throttle limits and replay ingestion budgets.
-2. Add pending-upload storage or signed pending-upload token support before changing `/api/process` to require it.
-3. Update the upload UI/API contract to pass pending upload id/nonce with the uploaded Blob URL.
-4. Add parser and ingestion limit checks, then update tests to cover oversized `statsJson` and no-write failure behavior.
-5. Deploy to staging with disposable Vercel Blob/Postgres resources and verify Blob deletion/readback and DB rollback behavior.
-6. Roll back by reverting the API contract and pending-upload migration only if staging shows incompatible upload behavior before production data depends on the new state.
+Apply Drizzle migrations in order. Pending bindings were added by the earlier hardening migration. The current `0003_ambiguous_human_cannonball.sql` adds `request_budgets` and `pending_uploads.cleanup_claimed_at`. Deploy the matching application, `CRON_SECRET`, and `vercel.json` schedule together. Session payloads include an issuance timestamp and random nonce; rotating either shared password or signing secret invalidates sessions.
 
-## Open Questions
+The 2026-10-04 deployment record verifies the earlier three migrations and upload/game flows, not the later fourth migration or new daily maintenance behavior. Recheck deployment, migration application, normalized ingress, and cleanup with disposable data before marking the current follow-up operationally verified.
 
-All three were resolved during implementation:
+## Resolved implementation choices
 
-- **Pending-upload state: Postgres table** (`pending_uploads`). The
-  consumed-binding requirement ("a consumed binding MUST NOT authorize a later
-  request") needs revocable server-side state, which a stateless signed token
-  cannot provide. The nonce is stored as a SHA-256 hash only; the blob pathname
-  `replays/<uploadId>.rofl` is deterministic (no random suffix) so process-time
-  URL matching is exact. Rows are swept opportunistically on create (expired >
-  1 day), avoiding a cron.
-- **Numeric budgets** (defaults in `src/lib/limits.ts`, injectable for tests):
-  10 participants, 4MB metadata, 256KB `statsJson` (checked before
-  `JSON.parse`), 32KB per participant object, nesting depth 4, 256-char cap on
-  retained string values. Real 10-player replays run ~40KB of statsJson with
-  flat participant objects, so each cap has generous headroom.
-- **`raw_stats`: bounded scalar allowlist** (kept, not removed): ~60 known stat
-  fields, scalars only, oversized strings omitted. `games.raw_metadata` is
-  reduced the same way to the four known top-level scalar fields. This keeps
-  bounded diagnostics without persisting arbitrary replay-controlled JSON.
+- Revocable Postgres pending rows, not stateless signed upload bindings.
+- Shared Postgres fixed-window counters, not process-local rate-limit maps.
+- Verified-IP login limits without a global fallback.
+- Daily claimed cleanup with canonical-file preservation, not on-create row sweeping.
+- Bounded diagnostic allowlists, not complete replay JSON retention.
