@@ -4,12 +4,13 @@
 
 ## 사용·운영·개발 안내
 
-| 문서                          | 내용                                                           |
-| ----------------------------- | -------------------------------------------------------------- |
-| [배포·운영](deployment.md)    | 본인 Vercel·Neon·Blob 연결, 환경변수, 마이그레이션과 정리 작업 |
-| [개발·테스트](development.md) | 개발 명령과 스키마 변경, 로컬·실파일 테스트의 범위             |
-| [내부 구조](architecture.md)  | 데이터 모델, 업로드 바인딩, 계정 연결과 인증·처리 한도         |
-| [Layerbase Valkey](valkey.md) | Vercel URL 연결, 조회 캐시·닉네임 자동완성과 Podman 검증       |
+| 문서                                 | 내용                                                           |
+| ------------------------------------ | -------------------------------------------------------------- |
+| [배포·운영](deployment.md)           | 본인 Vercel·Neon·Blob 연결, 환경변수, 마이그레이션과 정리 작업 |
+| [Discord 인증 운영](discord-auth.md) | Portal·봇·계정 권한·일일 정리·공유 차단과 실제 연동 확인       |
+| [개발·테스트](development.md)        | 개발 명령과 스키마 변경, 로컬·실파일 테스트의 범위             |
+| [내부 구조](architecture.md)         | 데이터 모델, 업로드 바인딩, 계정 연결과 인증·처리 한도         |
+| [Layerbase Valkey](valkey.md)        | Vercel URL 연결, 조회 캐시·닉네임 자동완성과 Podman 검증       |
 
 ## 설계와 작업 내역
 
@@ -17,6 +18,8 @@
 - [보안 하드닝](../openspec/changes/harden-security-scan-findings/): 업로드 소유권과 처리 예산의 설계 배경
 - [경기 관리·모임원 전적](../openspec/changes/add-match-management-and-member-history/): 기능 요구사항과 구현 작업
 - [세 역할·오너의 관리자 지정](../openspec/changes/introduce-owner-managed-admin-access/): 개인별 관리자 키, 조회 개인정보 제한과 오너 전용 감사로그
+- [Discord 인증 전환](../openspec/changes/replace-password-auth-with-discord/): 독립 로그인 계정·DB 세션·관리자 부여·하루 1회 탈퇴 정리와 공유 봇 차단
+- [리뷰 수정·검색 인덱스](../openspec/changes/fix-review-findings-and-index-search/): 등록 전 가입 판정, 최신 Riot 이름 보존, Unicode 검증과 DB 정확 검색
 - [모임원·경기 관리 개선](../openspec/changes/refine-member-and-game-management/): 보호된 실제 삭제, 활성 경기의 미연결 계정, 날짜·코멘트와 관리 표 페이징
 - [Layerbase Valkey 캐시](../openspec/changes/add-layerbase-valkey-cache/): 권한별 조회 캐시, 무효화와 닉네임 자동완성·검색
 - [이전 업로더·관리자 권한 분리](../openspec/changes/add-uploader-admin-roles/): 역할별 권한·세션·키 교체와 전환 정책
@@ -27,6 +30,11 @@ OpenSpec 문서는 요구사항·설계·작업 이력을 보관합니다. 실�
 
 이 문서들은 해당 날짜의 코드·리소스·테스트 결과를 기록한 자료입니다. 당시의 배포 ID,
 적용된 마이그레이션 수, 남은 작업은 현재 상태와 다를 수 있습니다.
+
+- [2026-10-12 리뷰 수정·DB 검색 인덱스](validation/2026-10-12-review-fixes.md): 최초 로그인 경합·리플레이 이름·Unicode 오류 수정, 1만 명 검색 실행 계획과 Node 24 전체 776개 테스트
+
+- [2026-10-09 Discord 인증 리뷰 수정](validation/2026-10-09-discord-auth-review-fixes.md): 가입 거절/회수의 실제 PostgreSQL 잠금 경합과 로그인 시도 누적 방지
+- [2026-10-08 Discord 인증](validation/2026-10-08-discord-auth.md): v5 DB 세션·계정 권한·일일 정리·공유 봇 차단과 로컬 Valkey·실제 리플레이 포함 702개 테스트
 
 - [2026-10-03 실제 솔랭 리플레이](validation/2026-10-03-real-replay.md): 실파일 파싱과 로컬 저장·조회
 - [2026-10-04 경기 관리·모임원 전적](validation/2026-10-04-mvp-features.md): 통합 테스트와 로컬 브라우저 검증

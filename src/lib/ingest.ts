@@ -12,6 +12,7 @@ import { appendAudit, lockActor, type DbTransaction } from "@/lib/audit";
 import { gameParticipants, games, riotAccounts } from "@/db/schema";
 import { assertWithinIngestBudget } from "@/lib/ingest-budget";
 import { formatKoreaDateInput } from "@/lib/game-date";
+import { isStorageText } from "@/lib/storage-text";
 import {
   parseRofl,
   RoflParseError,
@@ -30,6 +31,7 @@ const MAX_TRANSACTION_ATTEMPTS = 3;
 function resolvePlayedAt(lastModified: number | null | undefined): {
   playedAt: string;
   playedAtSource: "file_mtime" | "upload";
+  nameObservedAt: Date | null;
 } {
   if (
     typeof lastModified === "number" &&
@@ -40,11 +42,13 @@ function resolvePlayedAt(lastModified: number | null | undefined): {
     return {
       playedAt: formatKoreaDateInput(new Date(lastModified)),
       playedAtSource: "file_mtime",
+      nameObservedAt: new Date(lastModified),
     };
   }
   return {
     playedAt: formatKoreaDateInput(new Date()),
     playedAtSource: "upload",
+    nameObservedAt: null,
   };
 }
 
@@ -66,6 +70,14 @@ export async function ingestReplay(input: {
   actor?: Actor;
   uploadId?: string;
 }): Promise<IngestResult> {
+  if (
+    input.originalFilename !== null &&
+    !isStorageText(input.originalFilename)
+  ) {
+    throw new RoflParseError(
+      "Unsupported replay: filename contains invalid Unicode.",
+    );
+  }
   const fileHash = sha256Hex(input.bytes);
 
   const existing = await db
@@ -94,7 +106,9 @@ export async function ingestReplay(input: {
   // (participant rows, account upserts, JSONB size) BEFORE opening the
   // transaction so an over-budget replay performs no writes at all.
   assertWithinIngestBudget(parsed.participants);
-  const { playedAt, playedAtSource } = resolvePlayedAt(input.lastModified);
+  const { playedAt, playedAtSource, nameObservedAt } = resolvePlayedAt(
+    input.lastModified,
+  );
   // Upserts hold account row locks until commit. Use the same identity order
   // across replays even when teams, positions, or display names have changed.
   const participants = [...parsed.participants].sort((a, b) => {
@@ -144,7 +158,7 @@ export async function ingestReplay(input: {
       const seen = new Set<string>();
       const participantRows: (typeof gameParticipants.$inferInsert)[] = [];
       for (const p of participants) {
-        const accountId = await findOrCreateAccount(tx, p);
+        const accountId = await findOrCreateAccount(tx, p, nameObservedAt);
         if (seen.has(accountId)) {
           throw new RoflParseError(
             "Unsupported replay: multiple participants resolve to the same Riot account.",
@@ -250,6 +264,7 @@ function isUniqueConflict(error: unknown): boolean {
 async function findOrCreateAccount(
   tx: Tx,
   p: ParsedParticipant,
+  nameObservedAt: Date | null,
 ): Promise<string> {
   const sameName = and(
     eq(riotAccounts.gameName, p.riotGameName),
@@ -283,7 +298,10 @@ async function findOrCreateAccount(
           const promoted = await tx.transaction(async (savepoint) =>
             savepoint
               .update(riotAccounts)
-              .set({ puuid: p.puuid })
+              .set({
+                puuid: p.puuid,
+                nameObservedAt: sql`greatest(${riotAccounts.nameObservedAt}, ${nameObservedAt})`,
+              })
               .where(
                 and(
                   sameName,
@@ -299,20 +317,24 @@ async function findOrCreateAccount(
         if (!isUniqueConflict(error)) throw error;
       }
     }
+    // A conditional value update always returns the identity, even for stale
+    // observations. Compare under the upsert row lock, not a prior SELECT.
+    const latest = sql`(${riotAccounts.nameObservedAt} is null or excluded.name_observed_at >= ${riotAccounts.nameObservedAt})`;
     const rows = await tx
       .insert(riotAccounts)
       .values({
         gameName: p.riotGameName,
         tagLine: p.riotTagLine,
         puuid: p.puuid,
+        nameObservedAt,
       })
       .onConflictDoUpdate({
         target: riotAccounts.puuid,
         targetWhere: sql`${riotAccounts.puuid} is not null`,
-        // Refresh the display Riot ID in case the player renamed.
         set: {
-          gameName: sql`excluded.game_name`,
-          tagLine: sql`excluded.tag_line`,
+          gameName: sql`case when ${latest} then excluded.game_name else ${riotAccounts.gameName} end`,
+          tagLine: sql`case when ${latest} then excluded.tag_line else ${riotAccounts.tagLine} end`,
+          nameObservedAt: sql`greatest(${riotAccounts.nameObservedAt}, excluded.name_observed_at)`,
         },
       })
       .returning({ id: riotAccounts.id });
@@ -326,7 +348,15 @@ async function findOrCreateAccount(
     .from(riotAccounts)
     .where(sameName)
     .limit(2);
-  if (candidates.length === 1) return candidates[0].id;
+  if (candidates.length === 1) {
+    await tx
+      .update(riotAccounts)
+      .set({
+        nameObservedAt: sql`greatest(${riotAccounts.nameObservedAt}, ${nameObservedAt})`,
+      })
+      .where(eq(riotAccounts.id, candidates[0].id));
+    return candidates[0].id;
+  }
 
   const rows = await tx
     .insert(riotAccounts)
@@ -334,12 +364,15 @@ async function findOrCreateAccount(
       gameName: p.riotGameName,
       tagLine: p.riotTagLine,
       puuid: null,
+      nameObservedAt,
     })
     .onConflictDoUpdate({
       target: [riotAccounts.gameName, riotAccounts.tagLine],
       targetWhere: sql`${riotAccounts.puuid} is null`,
-      // No-op update so RETURNING yields the existing row's id.
-      set: { gameName: sql`excluded.game_name` },
+      // Retain the newest observation while RETURNING the existing identity.
+      set: {
+        nameObservedAt: sql`greatest(${riotAccounts.nameObservedAt}, excluded.name_observed_at)`,
+      },
     })
     .returning({ id: riotAccounts.id });
   return rows[0].id;

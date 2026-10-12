@@ -49,16 +49,8 @@ export type MemberHistory = {
   games: MemberHistoryGame[];
 };
 
-/**
- * Current account links determine the member's entire history. Group in SQL
- * before pagination so multiple linked accounts in one game count only once;
- * ambiguous participation never invents a champion, outcome or K/D/A.
- */
-export async function getMemberHistory(
-  memberId: string,
-  limit = 25,
-  offset = 0,
-): Promise<MemberHistory | null> {
+/** Fresh identity lookup for navigation, independent of cached game statistics. */
+export async function getMemberIdentity(memberId: string) {
   if (!isUuid(memberId)) return null;
   const [member] = await db
     .select({
@@ -69,6 +61,20 @@ export async function getMemberHistory(
     .from(members)
     .where(eq(members.id, memberId))
     .limit(1);
+  return member ?? null;
+}
+
+/**
+ * Current account links determine the member's entire history. Group in SQL
+ * before pagination so multiple linked accounts in one game count only once;
+ * ambiguous participation never invents a champion, outcome or K/D/A.
+ */
+export async function getMemberHistory(
+  memberId: string,
+  limit = 25,
+  offset = 0,
+): Promise<MemberHistory | null> {
+  const member = await getMemberIdentity(memberId);
   if (!member) return null;
 
   const memberGames = db.$with("member_games").as(

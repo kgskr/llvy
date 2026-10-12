@@ -1,6 +1,4 @@
 type EnvName =
-  | "READ_PASSWORD"
-  | "OWNER_PASSWORD"
   | "AUTH_SECRET"
   | "POSTGRES_URL"
   | "POSTGRES_URL_NON_POOLING"
@@ -12,8 +10,6 @@ type EnvName =
   | "BLOB_READ_WRITE_TOKEN";
 
 type RequiredServerEnv = {
-  readPassword: string;
-  ownerPassword: string;
   authSecret: string;
   postgresUrl: string;
   blobReadWriteToken: string;
@@ -47,8 +43,6 @@ function readOptionalEnv(name: EnvName): string | undefined {
 
 export function getServerEnv(): ServerEnv {
   return {
-    readPassword: readRequiredEnv("READ_PASSWORD"),
-    ownerPassword: readRequiredEnv("OWNER_PASSWORD"),
     authSecret: readRequiredEnv("AUTH_SECRET"),
     postgresUrl: readRequiredEnv("POSTGRES_URL"),
     blobReadWriteToken: readRequiredEnv("BLOB_READ_WRITE_TOKEN"),

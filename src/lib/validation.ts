@@ -1,3 +1,5 @@
+import { isStorageText } from "./storage-text";
+
 export const MEMBER_NAME_MAX_LENGTH = 80;
 export const MIN_BIRTH_YEAR = 1900;
 
@@ -20,6 +22,9 @@ export function validateMemberInput(
   currentYear = new Date().getFullYear(),
 ): MemberInput {
   const name = typeof nameValue === "string" ? nameValue.trim() : "";
+  if (!isStorageText(name)) {
+    return { ok: false, error: "이름에 사용할 수 없는 문자가 있습니다." };
+  }
   if (!name || name.length > MEMBER_NAME_MAX_LENGTH) {
     return {
       ok: false,

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   nextSuggestionIndex,
   nicknameSearchHref,
+  suggestionHref,
   scheduleNicknameAutocomplete,
 } from "./nickname-autocomplete-client";
 
@@ -20,7 +21,12 @@ function deferredResponse() {
   });
   return { promise, resolve };
 }
-const SUGGESTION = { id: "account", gameName: "한글닉네임", tagLine: "KR1" };
+const SUGGESTION = {
+  kind: "riot-account" as const,
+  id: "11111111-1111-4111-8111-111111111111",
+  gameName: "한글닉네임",
+  tagLine: "KR1",
+};
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
@@ -39,7 +45,7 @@ describe("nickname autocomplete request lifecycle", () => {
     scheduleNicknameAutocomplete("한글", current, fetcher);
     await vi.advanceTimersByTimeAsync(200);
     expect(fetcher).toHaveBeenCalledExactlyOnceWith(
-      "/api/search/autocomplete?nickname=%ED%95%9C%EA%B8%80",
+      "/api/search/autocomplete?q=%ED%95%9C%EA%B8%80",
       expect.objectContaining({
         cache: "no-store",
         credentials: "same-origin",
@@ -141,4 +147,65 @@ describe("keyboard selection and search navigation", () => {
       new URL(href, "https://llvy.invalid").searchParams.get("nickname"),
     ).toBe("javascript:alert(1)#한 글");
   });
+});
+
+describe("typed candidate validation", () => {
+  const member = {
+    kind: "member" as const,
+    id: "22222222-2222-4222-8222-222222222222",
+    name: "김모임원",
+    accounts: [{ gameName: "한글", tagLine: "KR1" }],
+  };
+  it("projects both kinds, strips private fields and builds local routes", async () => {
+    const handlers = callbacks();
+    scheduleNicknameAutocomplete(
+      "김",
+      handlers,
+      vi.fn<typeof fetch>().mockResolvedValue(
+        Response.json({
+          suggestions: [
+            {
+              ...member,
+              birthYear: 1991,
+              url: "https://evil.invalid",
+              accounts: [{ ...member.accounts[0], puuid: "secret" }],
+            },
+            { ...SUGGESTION, memberName: "private" },
+            member,
+          ],
+        }),
+      ),
+    );
+    await vi.advanceTimersByTimeAsync(200);
+    expect(handlers.onSuggestions).toHaveBeenCalledWith([member, SUGGESTION]);
+    expect(suggestionHref(member)).toBe(`/members/${member.id}`);
+    expect(suggestionHref(SUGGESTION)).toBe(
+      nicknameSearchHref("한글닉네임#KR1"),
+    );
+  });
+  it.each([
+    { ...member, id: "../../admin" },
+    { ...member, kind: "unknown" },
+    { ...member, name: 3 },
+    { ...member, accounts: [null] },
+    { ...member, accounts: Array(3).fill(member.accounts[0]) },
+    { ...SUGGESTION, tagLine: null },
+  ])(
+    "rejects malformed candidates without publishing partial results",
+    async (entry) => {
+      const handlers = callbacks();
+      scheduleNicknameAutocomplete(
+        "a",
+        handlers,
+        vi
+          .fn<typeof fetch>()
+          .mockResolvedValue(
+            Response.json({ suggestions: [SUGGESTION, entry] }),
+          ),
+      );
+      await vi.advanceTimersByTimeAsync(200);
+      expect(handlers.onError).toHaveBeenCalledOnce();
+      expect(handlers.onSuggestions).not.toHaveBeenCalled();
+    },
+  );
 });

@@ -3,6 +3,10 @@
     {
       "path": "/api/maintenance/uploads",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/maintenance/auth",
+      "schedule": "0 3 * * *"
     }
   ]
 }

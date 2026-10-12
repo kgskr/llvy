@@ -13,7 +13,6 @@ import {
 } from "vitest";
 
 import {
-  adminCredentials,
   auditLogs,
   gameParticipants,
   games,
@@ -27,6 +26,7 @@ import {
   resetTestDatabase,
 } from "@/test/database";
 import { replayBytes } from "@/test/replay";
+import { createMemberFixture } from "@/test/members";
 
 const mocks = vi.hoisted(() => ({ token: undefined as string | undefined }));
 vi.mock("server-only", () => ({}));
@@ -40,12 +40,9 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
-import { createSessionToken, type Actor } from "./auth";
-import {
-  authenticateAccessKey,
-  grantAdminCredential,
-  revokeAdminCredential,
-} from "./admin-credentials";
+import { type Actor } from "./auth";
+import { createTestSession } from "@/test/auth";
+import { revokeAdministrator } from "./account-administration";
 import { setGameExcluded, setGamePlayedAt } from "./game-mutations";
 import { ingestReplay } from "./ingest";
 import {
@@ -54,28 +51,29 @@ import {
   unlinkAccount,
   updateMember,
 } from "./member-mutations";
-import { createMember as createMemberFixture } from "./members";
-import { getSession, UnauthorizedError } from "./session";
+import { ForbiddenError, getSession, UnauthorizedError } from "./session";
 
 const PLAYED_AT = new Date("2026-10-01T12:00:00.000Z");
 
 beforeAll(migrateTestDatabase, 30_000);
 beforeEach(async () => {
   await resetTestDatabase();
-  vi.stubEnv("READ_PASSWORD", "integration-viewer-key");
-  vi.stubEnv("OWNER_PASSWORD", "integration-owner-key");
   vi.stubEnv("AUTH_SECRET", "independent-integration-signing-secret-32-bytes");
-  mocks.token = await createSessionToken("owner");
+  mocks.token = (await createTestSession("owner")).token;
 });
 afterEach(() => vi.unstubAllEnvs());
 afterAll(() => client.close());
 
 async function assignedAdministrator() {
   const memberId = await createMemberFixture("김관리자", 1990);
-  const issued = await grantAdminCredential(memberId);
-  const actor = (await authenticateAccessKey(issued.key))!;
-  const token = await createSessionToken(actor);
-  return { memberId, issued, actor, token };
+  const actor = await createTestSession("admin");
+  return {
+    memberId,
+    issued: { grantId: actor.adminGrantId },
+    actor,
+    token: actor.token,
+    accountId: actor.accountId,
+  };
 }
 
 function ingest(actor?: Actor, uploadId?: string, bytes = replayBytes()) {
@@ -150,8 +148,8 @@ describe("attributed administrative changes with real sessions", () => {
     const created = await event("member.created");
     expect(created).toMatchObject({
       actorRole: "admin",
-      actorMemberId: administrator.memberId,
-      actorCredentialId: administrator.issued.credentialId,
+      actorAccountId: administrator.accountId,
+      actorAdminGrantId: administrator.issued.grantId,
       actorName: "김관리자",
       targetType: "member",
       targetId: memberId,
@@ -163,7 +161,7 @@ describe("attributed administrative changes with real sessions", () => {
 
     expect(await updateMember(memberId, "김수정", null)).toBe(true);
     expect(await event("member.updated")).toMatchObject({
-      actorMemberId: administrator.memberId,
+      actorAccountId: administrator.accountId,
       actorName: "김관리자",
       targetId: memberId,
       before: { name: "김회원", birthYear: 1995 },
@@ -173,8 +171,8 @@ describe("attributed administrative changes with real sessions", () => {
     expect(await linkAccount(account.id, memberId)).toBe(true);
     expect(await event("account.linked")).toMatchObject({
       actorRole: "admin",
-      actorMemberId: administrator.memberId,
-      actorCredentialId: administrator.issued.credentialId,
+      actorAccountId: administrator.accountId,
+      actorAdminGrantId: administrator.issued.grantId,
       targetType: "account",
       targetId: account.id,
       before: { memberId: null },
@@ -187,7 +185,7 @@ describe("attributed administrative changes with real sessions", () => {
     expect(linked.linkedAt).toBeInstanceOf(Date);
     expect(await unlinkAccount(account.id)).toBe(true);
     expect(await event("account.unlinked")).toMatchObject({
-      actorMemberId: administrator.memberId,
+      actorAccountId: administrator.accountId,
       targetId: account.id,
       before: { memberId },
       after: { memberId: null },
@@ -203,13 +201,16 @@ describe("attributed administrative changes with real sessions", () => {
       .where(eq(members.id, memberId));
     expect(storedMember).toMatchObject({ name: "김수정", birthYear: null });
     const logs = await db.select().from(auditLogs);
-    expect(logs).toHaveLength(5); // One grant and four business changes.
-    expect(JSON.stringify(logs)).not.toContain(administrator.issued.key);
-    const [credential] = await db.select().from(adminCredentials);
-    expect(JSON.stringify(logs)).not.toContain(credential.keyHash);
+    expect(logs).toHaveLength(4);
+    expect(
+      logs.every(
+        (row) => row.actorMemberId === null && row.actorCredentialId === null,
+      ),
+    ).toBe(true);
+    expect(JSON.stringify(logs)).not.toContain(administrator.token);
   });
 
-  it("retains the original actor name snapshot after that administrator changes their name", async () => {
+  it("keeps login identity separate when an administrator edits a same-named game member", async () => {
     const administrator = await assignedAdministrator();
     mocks.token = administrator.token;
     await updateMember(administrator.memberId, "김새관리자", 1991);
@@ -218,7 +219,7 @@ describe("attributed administrative changes with real sessions", () => {
       actorName: "김관리자",
     });
     expect(await event("member.created")).toMatchObject({
-      actorName: "김새관리자",
+      actorName: "김관리자",
     });
   });
 
@@ -294,12 +295,40 @@ describe("attributed administrative changes with real sessions", () => {
     },
   );
 
+  it.each(["no session", "viewer"] as const)(
+    "blocks every member/game mutation for %s without changing business data or audit logs",
+    async (role) => {
+      const memberId = await createMemberFixture("보호 모임원", 1997);
+      const account = await accountFixture(memberId);
+      const { gameId } = await ingest();
+      const before = await snapshot();
+      mocks.token =
+        role === "viewer"
+          ? (await createTestSession("viewer")).token
+          : undefined;
+      const mutations = [
+        () => createMember("권한 없는 등록", null),
+        () => updateMember(memberId, "권한 없는 수정", null),
+        () => linkAccount(account.id, memberId),
+        () => unlinkAccount(account.id),
+        () => setGamePlayedAt(gameId, "2026-10-05"),
+        () => setGameExcluded(gameId, true),
+      ];
+      for (const mutation of mutations) {
+        await expect(mutation()).rejects.toBeInstanceOf(
+          role === "viewer" ? ForbiddenError : UnauthorizedError,
+        );
+        expect(await snapshot()).toEqual(before);
+      }
+    },
+  );
+
   it("blocks every business mutation and stale-actor replay commit after completed revocation, including duplicates", async () => {
     const administrator = await assignedAdministrator();
     const memberId = await createMemberFixture("보호 모임원", 1997);
     const account = await accountFixture();
     const { gameId } = await ingest();
-    await revokeAdminCredential(administrator.memberId);
+    await revokeAdministrator(administrator.accountId);
     mocks.token = administrator.token;
     expect(await getSession()).toBeNull();
     const before = await snapshot();
@@ -349,8 +378,8 @@ describe("replay commit audit and authorization", () => {
     ]) {
       expect(logs.find((log) => log.requestId === requestId)).toMatchObject({
         actorRole: "admin",
-        actorMemberId: administrator.memberId,
-        actorCredentialId: administrator.issued.credentialId,
+        actorAccountId: administrator.accountId,
+        actorAdminGrantId: administrator.issued.grantId,
         actorName: "김관리자",
         targetType: "upload",
         targetId: requestId,
@@ -380,7 +409,7 @@ describe("replay commit audit and authorization", () => {
       const retry = await ingest(administrator.actor, uploadId);
       expect(retry.duplicate).toBe(existing);
       expect(await event("replay.processed")).toMatchObject({
-        actorMemberId: administrator.memberId,
+        actorAccountId: administrator.accountId,
         targetId: uploadId,
         requestId: uploadId,
         result: existing ? "duplicate" : "success",

@@ -102,6 +102,17 @@ describe("POST /api/blob/upload", () => {
     expect(getPendingUpload).not.toHaveBeenCalled();
   });
 
+  it("returns 503 before Blob access when authority storage fails", async () => {
+    vi.mocked(getSession).mockRejectedValue(
+      new Error("private database details"),
+    );
+    const response = await POST(request());
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("private database details");
+    expect(handleUpload).not.toHaveBeenCalled();
+    expect(getPendingUpload).not.toHaveBeenCalled();
+  });
+
   it.each([
     ["consumed", { ...pending, state: "processed" }],
     ["expired", { ...pending, expiresAt: new Date(0) }],
@@ -178,8 +189,8 @@ describe("POST /api/blob/upload", () => {
     vi.mocked(getSession).mockResolvedValue({
       ...ownerSession,
       role: "admin",
-      memberId: crypto.randomUUID(),
-      credentialId: crypto.randomUUID(),
+      accountId: crypto.randomUUID(),
+      adminGrantId: crypto.randomUUID(),
     });
     expect((await POST(request())).status).toBe(400);
     expect(issuedConstraints).toBeUndefined();

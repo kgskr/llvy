@@ -11,6 +11,7 @@ const PAGE_SIZE = 50;
 const ACTION_LABELS: Record<string, string> = {
   "auth.login": "로그인",
   "auth.logout": "로그아웃",
+  "auth.account_suspended": "탈퇴 사용자 접근 정지",
   "admin.granted": "관리자 지정",
   "admin.revoked": "관리자 지정 취소",
   "member.created": "모임원 등록",
@@ -30,6 +31,7 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: "일반 사용자",
   admin: "관리자",
   owner: "서비스 오너",
+  system: "유지보수",
 };
 const RESULT_LABELS: Record<string, string> = {
   success: "성공",
@@ -42,6 +44,7 @@ const TARGET_LABELS: Record<string, string> = {
   game: "게임",
   upload: "업로드",
   session: "로그인 세션",
+  login_account: "로그인 계정",
 };
 const CHANGE_LABELS: Record<string, string> = {
   name: "이름",
@@ -166,15 +169,29 @@ export default async function AuditPage({
                           <dd>{log.requestId}</dd>
                           <dt>로그 ID</dt>
                           <dd>{log.id}</dd>
+                          {log.actorAccountId ? (
+                            <>
+                              <dt>실행 계정 ID</dt>
+                              <dd>{log.actorAccountId}</dd>
+                              <dt>Discord 사용자 ID</dt>
+                              <dd>{log.actorDiscordUserId}</dd>
+                            </>
+                          ) : null}
+                          {log.actorAdminGrantId ? (
+                            <>
+                              <dt>관리자 부여 ID</dt>
+                              <dd>{log.actorAdminGrantId}</dd>
+                            </>
+                          ) : null}
                           {log.actorMemberId ? (
                             <>
-                              <dt>실행 모임원 ID</dt>
+                              <dt>이전 실행 모임원 ID</dt>
                               <dd>{log.actorMemberId}</dd>
                             </>
                           ) : null}
                           {log.actorCredentialId ? (
                             <>
-                              <dt>관리자 발급 ID</dt>
+                              <dt>이전 관리자 발급 ID</dt>
                               <dd>{log.actorCredentialId}</dd>
                             </>
                           ) : null}

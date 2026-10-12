@@ -1,3 +1,4 @@
+import { createTestSession } from "@/test/auth";
 import { ownerActor } from "@/test/actor";
 import { randomUUID } from "node:crypto";
 
@@ -123,7 +124,7 @@ describe("pending upload persistence", () => {
     });
   });
 
-  it("enforces the session budget across concurrent reservations", async () => {
+  it("enforces the account budget across concurrent reservations", async () => {
     const attempts = await Promise.allSettled(
       Array.from({ length: 15 }, () =>
         createPendingUpload("one-session", ownerActor),
@@ -135,14 +136,20 @@ describe("pending upload persistence", () => {
     expect(
       attempts.filter((result) => result.status === "rejected"),
     ).toHaveLength(5);
+    await expect(
+      createPendingUpload("another-session", ownerActor),
+    ).rejects.toBeInstanceOf(UploadBudgetExceeded);
+    const another = await createTestSession("admin");
     expect(
-      await createPendingUpload("another-session", ownerActor),
+      await createPendingUpload("another-account", another),
     ).toHaveProperty("uploadId");
   });
 
   it("bounds total reservations even when a user creates fresh sessions", async () => {
-    for (let i = 0; i < 50; i += 1) {
-      await createPendingUpload(`session-${i}`, ownerActor);
+    for (let i = 0; i < 5; i++) {
+      const actor = await createTestSession("admin");
+      for (let j = 0; j < 10; j++)
+        await createPendingUpload(`session-${i}-${j}`, actor);
     }
     await expect(
       createPendingUpload("session-51", ownerActor),

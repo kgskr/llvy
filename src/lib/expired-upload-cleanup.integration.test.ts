@@ -1,3 +1,4 @@
+import { createTestSession } from "@/test/auth";
 import { ownerActor } from "@/test/actor";
 import { del, list } from "@vercel/blob";
 import { and, eq } from "drizzle-orm";
@@ -12,10 +13,10 @@ import {
 } from "vitest";
 
 import {
-  adminCredentials,
+  adminGrants,
+  authAccounts,
   auditLogs,
   games,
-  members,
   pendingUploads,
 } from "@/db/schema";
 import {
@@ -219,29 +220,16 @@ describe("expired upload reconciliation", () => {
   });
 
   it("records abandoned uploads using the stored administrator identity even after revocation and renaming", async () => {
-    const [member] = await db
-      .insert(members)
-      .values({ name: "김이전관리자", birthYear: 1990 })
-      .returning();
-    const [credential] = await db
-      .insert(adminCredentials)
-      .values({ memberId: member.id, keyHash: "a".repeat(64) })
-      .returning();
-    const actor: Actor = {
-      role: "admin",
-      memberId: member.id,
-      credentialId: credential.id,
-      name: member.name,
-    };
+    const actor = await createTestSession("admin", { name: "김이전관리자" });
     const binding = await agedBinding("revoked-abandoned", actor);
     await db
-      .update(adminCredentials)
+      .update(adminGrants)
       .set({ revokedAt: new Date() })
-      .where(eq(adminCredentials.id, credential.id));
+      .where(eq(adminGrants.id, actor.adminGrantId!));
     await db
-      .update(members)
-      .set({ name: "김현재이름" })
-      .where(eq(members.id, member.id));
+      .update(authAccounts)
+      .set({ displayName: "김현재이름" })
+      .where(eq(authAccounts.id, actor.accountId));
 
     expect(await reconcileExpiredUploads()).toMatchObject({
       removed: 1,
@@ -250,8 +238,8 @@ describe("expired upload reconciliation", () => {
     expect(await terminalLogs(binding.uploadId)).toEqual([
       expect.objectContaining({
         actorRole: "admin",
-        actorMemberId: member.id,
-        actorCredentialId: credential.id,
+        actorAccountId: actor.accountId,
+        actorAdminGrantId: actor.adminGrantId,
         actorName: "김이전관리자",
         requestId: binding.uploadId,
         result: "failure",
@@ -271,6 +259,9 @@ describe("expired upload reconciliation", () => {
         actorName: null,
         actorMemberId: null,
         actorCredentialId: null,
+        actorAccountId: null,
+        actorDiscordUserId: null,
+        actorAdminGrantId: null,
       })
       .where(eq(pendingUploads.id, binding.uploadId));
     expect(await reconcileExpiredUploads()).toMatchObject({
@@ -287,6 +278,37 @@ describe("expired upload reconciliation", () => {
         result: "failure",
       }),
     ]);
+  });
+
+  it("preserves a known legacy member/credential snapshot during cleanup", async () => {
+    const binding = await agedBinding("legacy-known-actor");
+    const memberId = crypto.randomUUID();
+    const credentialId = crypto.randomUUID();
+    await db
+      .update(pendingUploads)
+      .set({
+        actorRole: "admin",
+        actorName: "이전 관리자",
+        actorMemberId: memberId,
+        actorCredentialId: credentialId,
+        actorAccountId: null,
+        actorDiscordUserId: null,
+        actorAdminGrantId: null,
+      })
+      .where(eq(pendingUploads.id, binding.uploadId));
+    expect(await reconcileExpiredUploads()).toMatchObject({
+      removed: 1,
+      failed: 0,
+    });
+    expect(await terminalLogs(binding.uploadId)).toEqual([
+      expect.objectContaining({
+        actorMemberId: memberId,
+        actorCredentialId: credentialId,
+        actorAccountId: null,
+        actorName: "이전 관리자",
+      }),
+    ]);
+    expect(del).not.toHaveBeenCalled();
   });
 
   it.each(["success", "failure", "duplicate"] as const)(

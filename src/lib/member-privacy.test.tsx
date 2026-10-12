@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   token: undefined as string | undefined,
-  findActiveAdmin: vi.fn(),
+  findSessionActor: vi.fn(),
   listMembers: vi.fn(),
   gameDetail: vi.fn(),
   history: vi.fn(),
@@ -25,8 +25,8 @@ vi.mock("next/navigation", () => ({
     throw new Error("not-found");
   },
 }));
-vi.mock("@/lib/admin-credentials", () => ({
-  findActiveAdmin: mocks.findActiveAdmin,
+vi.mock("@/lib/authority", () => ({
+  findSessionActor: mocks.findSessionActor,
 }));
 vi.mock("@/lib/members", () => ({
   listMembersWithAccounts: mocks.listMembers,
@@ -36,7 +36,11 @@ vi.mock("@/lib/games", () => ({
   listGames: mocks.listGames,
   countGames: mocks.countGames,
 }));
-vi.mock("@/lib/member-history", () => ({ getMemberHistory: mocks.history }));
+vi.mock("@/lib/member-history", () => ({
+  getMemberHistory: mocks.history,
+  getMemberIdentity: async (id: string) =>
+    (await mocks.history(id))?.member ?? null,
+}));
 vi.mock("@/lib/champions", () => ({
   resolveChampionNames: async () => new Map(),
 }));
@@ -61,12 +65,12 @@ import GameDetailPage from "@/app/(app)/games/[id]/page";
 import MembersPage from "@/app/(app)/members/page";
 import MemberHistoryPage from "@/app/(app)/members/[id]/page";
 import UploadPage from "@/app/(app)/upload/page";
-import { createSessionToken, type SessionRole } from "@/lib/auth";
 import {
-  maskMemberName,
-  memberDisplayName,
-  projectMember,
-} from "@/lib/member-privacy";
+  createSessionToken,
+  randomReference,
+  type SessionRole,
+} from "@/lib/auth";
+import { projectMember } from "@/lib/member-privacy";
 import {
   getGameDetailReadModel,
   getGameListReadModel,
@@ -132,25 +136,23 @@ const HISTORY = {
 };
 
 async function signIn(role: SessionRole) {
-  mocks.token = await createSessionToken(
-    role === "admin"
-      ? { role, memberId: MEMBER_ID, credentialId: CREDENTIAL_ID }
-      : role,
-  );
+  mocks.token = await createSessionToken(randomReference());
+  mocks.findSessionActor.mockResolvedValue({
+    role,
+    accountId: MEMBER_ID,
+    discordUserId: "111111111111111111",
+    sessionId: randomUUID(),
+    adminGrantId: role === "admin" ? CREDENTIAL_ID : null,
+    name: MEMBER.name,
+  });
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.token = undefined;
-  vi.stubEnv("READ_PASSWORD", "test-viewer-key");
-  vi.stubEnv("OWNER_PASSWORD", "test-owner-key");
   vi.stubEnv("AUTH_SECRET", "independent-secret-with-at-least-32-bytes");
-  mocks.findActiveAdmin.mockResolvedValue({
-    role: "admin",
-    memberId: MEMBER_ID,
-    credentialId: CREDENTIAL_ID,
-    name: MEMBER.name,
-  });
+  vi.stubEnv("DISCORD_GUILD_ID", "222222222222222222");
+  vi.stubEnv("DISCORD_OWNER_USER_ID", "111111111111111111");
   mocks.listMembers.mockResolvedValue([MEMBER]);
   mocks.gameDetail.mockResolvedValue(GAME);
   mocks.history.mockResolvedValue(HISTORY);
@@ -160,38 +162,26 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("privacy-safe member projection", () => {
-  it.each([
-    ["김길수", "김*수"],
-    ["홍길동철", "홍**철"],
-    ["김수", "김*"],
-    ["김", "*"],
-    ["김길수".normalize("NFD"), "김*수"],
-    ["김👨‍👩‍👧‍👦수", "김*수"],
-  ])("masks graphemes in %s", (name, masked) => {
-    expect(maskMemberName(name)).toBe(masked);
-  });
-
   it("omits the birthYear property and preserves raw records", () => {
     const projected = projectMember(MEMBER, "viewer");
     expect(projected).not.toHaveProperty("birthYear");
-    expect(projected.name).toBe("김*수");
+    expect(projected.name).toBe(MEMBER.name);
     expect(MEMBER.name).toBe("김길수");
     expect(MEMBER.birthYear).toBe(1991);
     for (const role of ["admin", "owner"] as const) {
       expect(projectMember(MEMBER, role)).toEqual(MEMBER);
-      expect(memberDisplayName(MEMBER.name, role)).toBe(MEMBER.name);
     }
   });
 
-  it("removes original names and birth years before serializing read models", async () => {
+  it("preserves original names and omits birth years from serialized viewer read models", async () => {
     await signIn("viewer");
     const members = await getMembersReadModel();
     const history = await getMemberHistoryReadModel(MEMBER_ID);
     const game = await getGameDetailReadModel(GAME_ID);
     for (const payload of [members, history, game]) {
       const serialized = JSON.stringify(payload);
-      expect(serialized).toContain("김*수");
-      expect(serialized).not.toContain(MEMBER.name);
+      expect(serialized).toContain(MEMBER.name);
+      expect(serialized).not.toContain("김*수");
       expect(serialized).not.toContain("birthYear");
       expect(serialized).not.toContain("1991");
       expect(serialized).not.toContain(mocks.token);
@@ -206,7 +196,7 @@ describe("privacy-safe member projection", () => {
     for (const role of ["owner", "viewer", "admin", "viewer"] as const) {
       await signIn(role);
       const { members } = await getMembersReadModel();
-      expect(members[0].name).toBe(role === "viewer" ? "김*수" : MEMBER.name);
+      expect(members[0].name).toBe(MEMBER.name);
       expect("birthYear" in members[0]).toBe(role !== "viewer");
     }
     expect(mocks.listMembers).toHaveBeenCalledTimes(4);
@@ -238,7 +228,7 @@ describe("read model authorization and page privacy", () => {
     await signIn("admin");
     expect((await getMembersReadModel()).members[0].name).toBe(MEMBER.name);
     mocks.listMembers.mockClear();
-    mocks.findActiveAdmin.mockResolvedValue(null);
+    mocks.findSessionActor.mockResolvedValue(null);
     await expect(getMembersReadModel()).rejects.toThrow("redirect:/login");
     await expect(getGameDetailReadModel(GAME_ID)).rejects.toThrow(
       "redirect:/login",
@@ -276,8 +266,8 @@ describe("read model authorization and page privacy", () => {
         await AppLayout({ children: <p>ゲーム</p> }),
       );
       for (const html of [members, history, game]) {
-        expect(html).toContain(privileged ? MEMBER.name : "김*수");
-        expect(html.includes(MEMBER.name)).toBe(privileged);
+        expect(html).toContain(MEMBER.name);
+        expect(html).not.toContain("김*수");
         expect(html).toContain(ACCOUNT.gameName);
       }
       expect(members.includes("1991")).toBe(privileged);
@@ -327,7 +317,7 @@ describe("read model authorization and page privacy", () => {
         searchParams: Promise.resolve({}),
       }),
     );
-    expect(html).toContain("김*수의 전적");
+    expect(html).toContain("김길수의 전적");
     expect(html).toContain("2026. 10. 2.");
     expect(html).toContain("20분 00초");
     expect(html).not.toContain("오후");
@@ -344,7 +334,7 @@ describe("read model authorization and page privacy", () => {
       expect(renderToStaticMarkup(await UploadPage())).toContain("업로드 입력");
     }
     await signIn("admin");
-    mocks.findActiveAdmin.mockResolvedValue(null);
+    mocks.findSessionActor.mockResolvedValue(null);
     await expect(UploadPage()).rejects.toThrow("redirect:/login");
   });
 

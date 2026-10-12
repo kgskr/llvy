@@ -5,8 +5,6 @@ import { desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
 import { db } from "@/db";
 import { gameParticipants, games, members, riotAccounts } from "@/db/schema";
 import { isUuid } from "@/lib/validation";
-import { validateGameDateInput } from "@/lib/game-date";
-import { invalidateQueryCache } from "@/lib/query-cache";
 
 export type GameVisibility = "active" | "excluded";
 
@@ -153,39 +151,4 @@ export async function getGameDetail(id: string): Promise<GameDetail | null> {
     originalFilename: game.originalFilename,
     participants,
   };
-}
-
-/** Reversible exclusion preserves the replay, its content hash and participants. */
-export async function setGameExcluded(
-  id: string,
-  excluded: boolean,
-): Promise<boolean> {
-  if (!isUuid(id) || typeof excluded !== "boolean") return false;
-  const rows = await db
-    .update(games)
-    .set({
-      excludedAt: excluded ? sql`coalesce(${games.excludedAt}, now())` : null,
-    })
-    .where(eq(games.id, id))
-    .returning({ id: games.id });
-  if (rows.length) await invalidateQueryCache();
-  return rows.length > 0;
-}
-
-/** Correct only the override; null restores the preserved source date. */
-export async function setGamePlayedAt(
-  id: string,
-  playedAt: string | null,
-): Promise<boolean> {
-  if (!isUuid(id)) return false;
-  if (playedAt !== null && !validateGameDateInput(playedAt).ok) {
-    return false;
-  }
-  const rows = await db
-    .update(games)
-    .set({ playedAtOverride: playedAt })
-    .where(eq(games.id, id))
-    .returning({ id: games.id });
-  if (rows.length) await invalidateQueryCache();
-  return rows.length > 0;
 }

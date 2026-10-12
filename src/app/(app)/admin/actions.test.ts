@@ -12,7 +12,6 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("next/cache", () => ({ revalidatePath: mocks.revalidatePath }));
 vi.mock("@/lib/member-mutations", () => ({
-  ActiveAdministratorError: class ActiveAdministratorError extends Error {},
   createMember: mocks.createMember,
   deleteMember: mocks.deleteMember,
   updateMember: mocks.updateMember,
@@ -26,7 +25,6 @@ vi.mock("@/lib/session", () => ({
 }));
 
 import { ForbiddenError, UnauthorizedError } from "@/lib/session";
-import { ActiveAdministratorError } from "@/lib/member-mutations";
 import {
   createMemberAction,
   deleteMemberAction,
@@ -218,17 +216,6 @@ describe("member administration actions", () => {
       )?.status,
     ).toBe("error");
     expect(mocks.deleteMember).not.toHaveBeenCalled();
-  });
-
-  it("reports active administrator protection without exposing an internal failure", async () => {
-    mocks.deleteMember.mockRejectedValue(new ActiveAdministratorError());
-    const result = await deleteMemberAction(
-      null,
-      form({ memberId: MEMBER_ID, confirmed: "yes" }),
-    );
-    expect(result?.status).toBe("error");
-    expect(result?.message).toContain("서비스 소유자에게 문의하세요.");
-    expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
 
   it("reports already missing members instead of claiming deletion succeeded", async () => {

@@ -8,8 +8,8 @@ import {
   listGames,
   type GameVisibility,
 } from "@/lib/games";
-import { getMemberHistory } from "@/lib/member-history";
-import { memberDisplayName, projectMember } from "@/lib/member-privacy";
+import { getMemberHistory, getMemberIdentity } from "@/lib/member-history";
+import { projectMember } from "@/lib/member-privacy";
 import { listMembersWithAccounts } from "@/lib/members";
 import { getSession } from "@/lib/session";
 import { parsePageNumber } from "@/lib/validation";
@@ -77,10 +77,7 @@ export async function getGameDetailReadModel(id: string) {
               gameName: participant.gameName,
               tagLine: participant.tagLine,
               memberId: participant.memberId,
-              memberName:
-                participant.memberName === null
-                  ? null
-                  : memberDisplayName(participant.memberName, role),
+              memberName: participant.memberName,
             })),
           }
         : null;
@@ -118,7 +115,26 @@ export async function getMemberHistoryReadModel(
         : null;
     },
   );
-  return { role, history: projected };
+  // A stale suggestion/history snapshot must not resurrect a deleted member or
+  // display an old name. Statistics keep their existing bounded cache lifetime.
+  const current = await getMemberIdentity(id);
+  return {
+    role,
+    history:
+      projected && current
+        ? {
+            ...projected,
+            member: projectMember(
+              {
+                id: current.id,
+                name: current.name,
+                birthYear: current.birthYear,
+              },
+              role,
+            ),
+          }
+        : null,
+  };
 }
 
 export async function getGameListReadModel(

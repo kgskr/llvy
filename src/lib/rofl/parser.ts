@@ -22,6 +22,16 @@
  */
 
 import { REPLAY_INGEST_LIMITS, type ReplayIngestLimits } from "../limits";
+import { isStorageText } from "../storage-text";
+
+function checkedText(value: string): string {
+  if (!isStorageText(value)) {
+    throw new RoflParseError(
+      "Unsupported replay: text contains invalid Unicode.",
+    );
+  }
+  return value;
+}
 
 /** Thrown for files that are not parseable, carry no usable participant stats,
  * or exceed the supported replay shape/budgets. */
@@ -243,11 +253,15 @@ function asString(value: unknown): string {
       "Unsupported replay: participant text fields must contain scalar values.",
     );
   }
-  return typeof value === "string" ? value : value == null ? "" : String(value);
+  return typeof value === "string"
+    ? checkedText(value)
+    : value == null
+      ? ""
+      : String(value);
 }
 
 function nonEmpty(value: unknown): string | null {
-  const s = typeof value === "string" ? value.trim() : "";
+  const s = typeof value === "string" ? checkedText(value).trim() : "";
   return s.length > 0 ? s : null;
 }
 
@@ -377,15 +391,16 @@ function assertParticipantEntryWithinBudget(
       "Unsupported replay: participant stats entry is not an object.",
     );
   }
-  // Serialization cost is bounded by the statsJson size budget checked above.
-  if (utf8ByteLength(JSON.stringify(entry)) > limits.maxParticipantJsonBytes) {
-    throw new RoflParseError(
-      "Unsupported replay: a participant stats object exceeds the supported size.",
-    );
-  }
+  // Check depth BEFORE stringify: Node 24's serializer can exhaust its stack
+  // on deeply nested input that is still below the statsJson byte budget.
   if (exceedsDepth(entry, limits.maxParticipantDepth)) {
     throw new RoflParseError(
       "Unsupported replay: participant stats are nested too deeply.",
+    );
+  }
+  if (utf8ByteLength(JSON.stringify(entry)) > limits.maxParticipantJsonBytes) {
+    throw new RoflParseError(
+      "Unsupported replay: a participant stats object exceeds the supported size.",
     );
   }
 }
@@ -403,7 +418,7 @@ function boundToAllowlist(
     if (typeof value === "number" || typeof value === "boolean") {
       out[key] = value;
     } else if (typeof value === "string" && value.length <= maxValueChars) {
-      out[key] = value;
+      out[key] = checkedText(value);
     }
     // Oversized strings and non-scalars are omitted, not truncated: the
     // retained shape stays bounded and unambiguous.

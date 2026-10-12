@@ -428,6 +428,18 @@ describe("POST /api/process", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it("returns 503 before claims or downloads when authority storage fails", async () => {
+    vi.mocked(getSession).mockRejectedValue(
+      new Error("private database details"),
+    );
+    const response = await POST(request());
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("private database details");
+    expect(getPendingUpload).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+    expect(ingestReplay).not.toHaveBeenCalled();
+  });
+
   it("rejects viewer processing before reading any binding or blob", async () => {
     vi.mocked(getSession).mockResolvedValue({
       ...ownerSession,
@@ -443,8 +455,8 @@ describe("POST /api/process", () => {
     vi.mocked(getSession).mockResolvedValue({
       ...ownerSession,
       role: "admin",
-      memberId: crypto.randomUUID(),
-      credentialId: crypto.randomUUID(),
+      accountId: crypto.randomUUID(),
+      adminGrantId: crypto.randomUUID(),
     });
     expect((await POST(request())).status).toBe(403);
     expect(claimPendingUpload).not.toHaveBeenCalled();

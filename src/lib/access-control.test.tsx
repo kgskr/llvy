@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import { NextRequest } from "next/server";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -30,6 +30,7 @@ const mocks = vi.hoisted(() => ({
   recordAudit: vi.fn(),
   listAuditLogs: vi.fn(),
   adminActive: true,
+  actors: new Map<string, import("./auth").Actor>(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -80,42 +81,24 @@ vi.mock("@/lib/games", () => ({
 }));
 vi.mock("@/lib/member-history", () => ({
   getMemberHistory: mocks.getMemberHistory,
+  getMemberIdentity: async (id: string) =>
+    (await mocks.getMemberHistory(id))?.member ?? null,
 }));
 vi.mock("@/lib/pending-upload-store", () => ({
   createPendingUpload: mocks.createPendingUpload,
   UploadBudgetExceeded: class extends Error {},
 }));
-vi.mock("@/lib/admin-credentials", async () => {
-  const { authenticatePassword } = await import("./auth");
-  return {
-    findActiveAdmin: async (credentialId: string, memberId: string) =>
-      mocks.adminActive &&
-      credentialId === ADMIN_ACTOR.credentialId &&
-      memberId === ADMIN_ACTOR.memberId
-        ? ADMIN_ACTOR
-        : null,
-    authenticateAccessKey: async (key: string) => {
-      const role = authenticatePassword(key);
-      if (role)
-        return {
-          role,
-          memberId: null,
-          credentialId: null,
-          name: role === "owner" ? "서비스 오너" : "일반 사용자",
-        };
-      return key === ADMIN_KEY && mocks.adminActive ? ADMIN_ACTOR : null;
-    },
-    listAdminAssignments: async () => [],
-  };
-});
+vi.mock("@/lib/authority", () => ({
+  findSessionActor: async (hash: string) => {
+    const actor = mocks.actors.get(hash);
+    return actor && (actor.role !== "admin" || mocks.adminActive)
+      ? actor
+      : null;
+  },
+}));
 vi.mock("@/lib/audit", () => ({
   recordAudit: mocks.recordAudit,
   listAuditLogs: mocks.listAuditLogs,
-}));
-vi.mock("@/app/(app)/admin/credential-controls", () => ({
-  CredentialControls: () => (
-    <button data-management="credential">관리자 지정</button>
-  ),
 }));
 vi.mock("@/lib/champions", () => ({
   resolveChampionNames: async () => new Map(),
@@ -142,7 +125,7 @@ import {
   SESSION_COOKIE,
   SESSION_MAX_AGE_SECONDS,
   createSessionToken,
-  readSessionToken,
+  randomReference,
 } from "./auth";
 import {
   assertAdmin,
@@ -152,7 +135,6 @@ import {
   UnauthorizedError,
 } from "./session";
 import { proxy } from "@/proxy";
-import { login } from "@/app/login/actions";
 import { POST as reserveUpload } from "@/app/api/uploads/route";
 import {
   createMemberAction,
@@ -174,17 +156,22 @@ import GameDetailPage from "@/app/(app)/games/[id]/page";
 import MembersPage from "@/app/(app)/members/page";
 import MemberHistoryPage from "@/app/(app)/members/[id]/page";
 
-const VIEWER_KEY = "test-viewer-key";
-const ADMIN_KEY = "test-administrator-key";
-const OWNER_KEY = "test-private-owner-key";
-const ADMIN_ACTOR = {
-  role: "admin" as const,
-  memberId: "11111111-1111-4111-8111-111111111111",
-  credentialId: "22222222-2222-4222-8222-222222222222",
-  name: "김관리",
-};
-function sessionToken(role: "viewer" | "admin" | "owner") {
-  return createSessionToken(role === "admin" ? ADMIN_ACTOR : role);
+async function sessionToken(role: "viewer" | "admin" | "owner") {
+  const reference = randomReference();
+  mocks.actors.set(createHash("sha256").update(reference).digest("hex"), {
+    role,
+    accountId: randomUUID(),
+    discordUserId: "111111111111111111",
+    sessionId: randomUUID(),
+    adminGrantId: role === "admin" ? randomUUID() : null,
+    name:
+      role === "admin"
+        ? "김관리"
+        : role === "owner"
+          ? "서비스 오너"
+          : "일반 사용자",
+  });
+  return createSessionToken(reference);
 }
 const GAME_ID = randomUUID();
 const MUTATIONS = [
@@ -251,10 +238,11 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.token = undefined;
   mocks.adminActive = true;
+  mocks.actors.clear();
+  vi.stubEnv("DISCORD_GUILD_ID", "222222222222222222");
+  vi.stubEnv("DISCORD_OWNER_USER_ID", "111111111111111111");
   vi.stubEnv("NODE_ENV", "development");
   vi.stubEnv("VERCEL", undefined);
-  vi.stubEnv("READ_PASSWORD", VIEWER_KEY);
-  vi.stubEnv("OWNER_PASSWORD", OWNER_KEY);
   vi.stubEnv("AUTH_SECRET", "independent-server-secret-at-least-32-bytes");
   vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_test_secret");
   vi.stubEnv("BLOB_ACCESS", "private");
@@ -338,9 +326,9 @@ describe("actual session authorization at mutation entry points", () => {
         kind === "missing"
           ? undefined
           : kind === "tampered"
-            ? token.replace(".viewer.", ".admin.")
+            ? token.slice(0, -1) + (token.endsWith("A") ? "B" : "A")
             : kind === "legacy"
-              ? token.replace("v4.viewer", "v3.viewer")
+              ? token.replace("v5.", "v4.")
               : token;
       const clock =
         kind === "expired"
@@ -394,55 +382,6 @@ describe("actual session authorization at mutation entry points", () => {
 });
 
 describe("login and route authorization", () => {
-  it.each([
-    [VIEWER_KEY, "admin", "/admin?view=all", "viewer", "/"],
-    [VIEWER_KEY, "admin", "/admin/nested", "viewer", "/"],
-    [VIEWER_KEY, "admin", "/games?page=2", "viewer", "/games?page=2"],
-    [VIEWER_KEY, "admin", "//evil.test", "viewer", "/"],
-    [VIEWER_KEY, "owner", "/", "viewer", "/"],
-    [ADMIN_KEY, "viewer", "/", "admin", "/"],
-    [OWNER_KEY, "viewer", "/", "owner", "/"],
-    [ADMIN_KEY, "viewer", "/admin", "admin", "/admin"],
-    [ADMIN_KEY, "owner", "/admin/audit", "admin", "/games"],
-    [OWNER_KEY, "viewer", "/admin/audit", "owner", "/admin/audit"],
-  ])(
-    "uses the matching key for role and safe redirect to %s",
-    async (key, submittedRole, redirectTo, role, destination) => {
-      await expect(
-        login(null, form({ password: key, role: submittedRole, redirectTo })),
-      ).rejects.toThrow(`redirect:${destination}`);
-      const [cookie, token, options] = mocks.setCookie.mock.calls[0];
-      expect(cookie).toBe(SESSION_COOKIE);
-      expect((await readSessionToken(token))?.role).toBe(role);
-      expect(options).toMatchObject({
-        httpOnly: true,
-        sameSite: "lax",
-        path: "/",
-        maxAge: SESSION_MAX_AGE_SECONDS,
-      });
-    },
-  );
-
-  it.each([
-    [VIEWER_KEY, "/"],
-    [ADMIN_KEY, "/"],
-    [OWNER_KEY, "/"],
-  ])(
-    "chooses the search landing when no destination is supplied",
-    async (key, destination) => {
-      await expect(login(null, form({ password: key }))).rejects.toThrow(
-        `redirect:${destination}`,
-      );
-    },
-  );
-
-  it("does not issue a session when authentication configuration is invalid", async () => {
-    vi.stubEnv("AUTH_SECRET", "");
-    const result = await login(null, form({ password: VIEWER_KEY }));
-    expect(result?.error).toContain("설정");
-    expect(mocks.setCookie).not.toHaveBeenCalled();
-  });
-
   it("preserves unauthenticated API 401 and login redirects", async () => {
     const api = await proxy(new NextRequest("http://localhost/api/uploads"));
     expect(api.status).toBe(401);
@@ -453,7 +392,7 @@ describe("login and route authorization", () => {
   });
 
   it.each(["/admin", "/admin/", "/admin/nested", "/upload"])(
-    "redirects viewer requests for %s",
+    "defers viewer role authorization for %s to the protected entry point",
     async (path) => {
       mocks.token = await sessionToken("viewer");
       const response = await proxy(
@@ -461,12 +400,12 @@ describe("login and route authorization", () => {
           headers: { cookie: `${SESSION_COOKIE}=${mocks.token}` },
         }),
       );
-      expect(response.headers.get("location")).toBe("http://localhost/members");
+      expect(response.headers.get("x-middleware-next")).toBe("1");
     },
   );
 
   it.each(["viewer", "admin"] as const)(
-    "blocks %s audit paths at Proxy",
+    "defers %s audit authority to the owner DAL",
     async (role) => {
       mocks.token = await sessionToken(role);
       for (const path of ["/admin/audit", "/admin/audit/nested"]) {
@@ -475,9 +414,7 @@ describe("login and route authorization", () => {
             headers: { cookie: `${SESSION_COOKIE}=${mocks.token}` },
           }),
         );
-        expect(response.headers.get("location")).toBe(
-          "http://localhost/members",
-        );
+        expect(response.headers.get("x-middleware-next")).toBe("1");
       }
     },
   );
@@ -629,9 +566,7 @@ describe("verified role visibility", () => {
           searchParams: Promise.resolve({}),
         }),
       );
-      expect(html).toContain(
-        role === "viewer" ? "조****원의 전적" : "조회 모임원의 전적",
-      );
+      expect(html).toContain("조회 모임원의 전적");
       expect(html).toContain("계정 중복 연결 확인");
       expect(html).toContain("집계할 포지션 전적이 없습니다.");
       expect(html.includes('href="/admin"')).toBe(role !== "viewer");

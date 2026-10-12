@@ -3,28 +3,29 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
-import type { NicknameSuggestion } from "@/lib/nickname-search";
+import type { SearchSuggestion } from "@/lib/search-contract";
 import { riotId } from "@/lib/format";
 import {
   nextSuggestionIndex,
-  nicknameSearchHref,
+  suggestionHref,
   scheduleNicknameAutocomplete,
 } from "./nickname-autocomplete-client";
 
 export function NicknameSearchForm({
-  initialNickname = "",
+  initialQuery = "",
 }: {
-  initialNickname?: string;
+  initialQuery?: string;
 }) {
   const router = useRouter();
   const fieldId = useId();
   const listId = `${fieldId}-options`;
-  const [nickname, setNickname] = useState(initialNickname);
-  const [suggestions, setSuggestions] = useState<NicknameSuggestion[]>([]);
+  const [nickname, setNickname] = useState(initialQuery);
+  const [suggestions, setSuggestions] = useState<SearchSuggestion[]>([]);
   const [activeIndex, setActiveIndex] = useState(-1);
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const composing = useRef(false);
   const focused = useRef(false);
   const activeOption = useRef<HTMLLIElement | null>(null);
   const cancelCurrent = useRef<(() => void) | null>(null);
@@ -40,7 +41,7 @@ export function NicknameSearchForm({
       onError: () => {
         setLoading(false);
         setError(
-          "자동완성을 불러오지 못했습니다. 닉네임을 직접 입력해 검색하세요.",
+          "자동완성을 불러오지 못했습니다. 이름이나 닉네임을 직접 입력해 검색하세요.",
         );
       },
       onUnauthorized: () => {
@@ -57,15 +58,18 @@ export function NicknameSearchForm({
       activeOption.current?.scrollIntoView({ block: "nearest" });
   }, [open, activeIndex]);
 
-  function selectSuggestion(suggestion: NicknameSuggestion) {
+  function selectSuggestion(suggestion: SearchSuggestion) {
     cancelCurrent.current?.();
     focused.current = false;
     setOpen(false);
     setActiveIndex(-1);
     setLoading(false);
-    const value = riotId(suggestion.gameName, suggestion.tagLine);
+    const value =
+      suggestion.kind === "member"
+        ? suggestion.name
+        : riotId(suggestion.gameName, suggestion.tagLine);
     setNickname(value);
-    router.push(nicknameSearchHref(value));
+    router.push(suggestionHref(suggestion));
   }
 
   const expanded = open && suggestions.length > 0;
@@ -75,9 +79,9 @@ export function NicknameSearchForm({
       method="get"
       className="nickname-search-form"
       role="search"
-      aria-label="롤 닉네임 검색"
+      aria-label="모임원 이름 또는 롤 닉네임 검색"
       onSubmit={(event) => {
-        if (!nickname.trim()) event.preventDefault();
+        if (!nickname.trim() || composing.current) event.preventDefault();
         cancelCurrent.current?.();
         setOpen(false);
         setLoading(false);
@@ -106,16 +110,16 @@ export function NicknameSearchForm({
           />
         </svg>
         <label htmlFor={fieldId} className="sr-only">
-          롤 닉네임
+          모임원 이름 또는 롤 닉네임 검색
         </label>
         <input
           id={fieldId}
-          name="nickname"
+          name="q"
           type="search"
           required
           role="combobox"
           value={nickname}
-          placeholder="롤 닉네임#태그를 입력하세요"
+          placeholder="모임원 이름 또는 롤 닉네임#태그를 입력하세요"
           autoComplete="off"
           autoCapitalize="off"
           spellCheck={false}
@@ -146,8 +150,21 @@ export function NicknameSearchForm({
             setLoading(false);
             setError(null);
           }}
+          onCompositionStart={() => {
+            composing.current = true;
+          }}
+          onCompositionEnd={() => {
+            composing.current = false;
+          }}
           onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return;
+            if (
+              composing.current ||
+              event.nativeEvent.isComposing ||
+              event.keyCode === 229
+            ) {
+              if (event.key === "Enter") event.preventDefault();
+              return;
+            }
             if (
               (event.key === "ArrowDown" || event.key === "ArrowUp") &&
               suggestions.length > 0
@@ -180,11 +197,11 @@ export function NicknameSearchForm({
           id={listId}
           className="nickname-suggestions"
           role="listbox"
-          aria-label="저장된 롤 닉네임"
+          aria-label="모임원 이름과 롤 닉네임 추천"
         >
           {suggestions.map((suggestion, index) => (
             <li
-              key={suggestion.id}
+              key={`${suggestion.kind}:${suggestion.id}`}
               id={`${listId}-${index}`}
               role="option"
               ref={activeIndex === index ? activeOption : undefined}
@@ -193,7 +210,28 @@ export function NicknameSearchForm({
               onMouseEnter={() => setActiveIndex(index)}
               onClick={() => selectSuggestion(suggestion)}
             >
-              {riotId(suggestion.gameName, suggestion.tagLine)}
+              {suggestion.kind === "member" ? (
+                <>
+                  <span>
+                    <strong>{suggestion.name}</strong>{" "}
+                    <small className="muted">모임원</small>
+                  </span>
+                  <small className="table-note">
+                    {suggestion.accounts.length
+                      ? suggestion.accounts
+                          .map((account) =>
+                            riotId(account.gameName, account.tagLine),
+                          )
+                          .join(" · ")
+                      : "연결된 계정 없음"}
+                  </small>
+                </>
+              ) : (
+                <span>
+                  {riotId(suggestion.gameName, suggestion.tagLine)}{" "}
+                  <small className="muted">라이엇 계정</small>
+                </span>
+              )}
             </li>
           ))}
         </ul>
@@ -206,8 +244,8 @@ export function NicknameSearchForm({
       >
         {error ??
           (loading
-            ? "닉네임을 찾는 중…"
-            : "저장된 게임에 연결된 모임원의 롤 닉네임을 검색하세요.")}
+            ? "이름과 닉네임을 찾는 중…"
+            : "모임원 이름이나 저장된 게임의 롤 닉네임을 검색하세요.")}
       </p>
     </form>
   );

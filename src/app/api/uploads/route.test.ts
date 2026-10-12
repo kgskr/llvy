@@ -34,6 +34,16 @@ describe("POST /api/uploads", () => {
 
   afterEach(() => vi.unstubAllEnvs());
 
+  it("returns 503 without allocating a binding when authority storage fails", async () => {
+    vi.mocked(getSession).mockRejectedValue(
+      new Error("private database details"),
+    );
+    const response = await POST(request({ filename: "match.rofl" }));
+    expect(response.status).toBe(503);
+    expect(await response.text()).not.toContain("private database details");
+    expect(createPendingUpload).not.toHaveBeenCalled();
+  });
+
   it.each(["public", "private"] as const)(
     "returns the %s access mode without disclosing the store token",
     async (access) => {

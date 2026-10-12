@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   listMemberOptions: vi.fn(),
   listAssignments: vi.fn(),
   listAuditLogs: vi.fn(),
+  listLoginAccounts: vi.fn(),
+  maintenanceStatus: vi.fn(),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -25,10 +27,28 @@ vi.mock("@/lib/members", () => ({
   countUnlinkedAccounts: mocks.countUnlinked,
   listMemberOptions: mocks.listMemberOptions,
 }));
-vi.mock("@/lib/admin-credentials", () => ({
-  listAdminAssignments: mocks.listAssignments,
-}));
 vi.mock("@/lib/audit", () => ({ listAuditLogs: mocks.listAuditLogs }));
+vi.mock("@/lib/account-administration", () => ({
+  listLoginAccounts: mocks.listLoginAccounts,
+}));
+vi.mock("@/lib/auth-maintenance", () => ({
+  getAuthenticationMaintenanceStatus: mocks.maintenanceStatus,
+}));
+vi.mock("./users/permission-controls", () => ({
+  PermissionControls: ({
+    accountId,
+    administrator,
+    suspended,
+  }: {
+    accountId: string;
+    administrator: boolean;
+    suspended: boolean;
+  }) => (
+    <button data-account={accountId} disabled={suspended}>
+      {administrator ? "지정 취소" : "관리자로 지정"}
+    </button>
+  ),
+}));
 vi.mock("./forms", () => ({
   AdminFeedbackProvider: ({ children }: { children: React.ReactNode }) =>
     children,
@@ -51,16 +71,9 @@ vi.mock("./forms", () => ({
     <form data-management="delete" data-member={memberId} />
   ),
 }));
-vi.mock("./credential-controls", () => ({
-  CredentialControls: ({ administrator }: { administrator: boolean }) => (
-    <div data-owner="credentials">
-      {administrator ? "지정 취소" : "관리자로 지정"}
-    </div>
-  ),
-}));
-
 import AdminPage from "./page";
 import AuditPage from "./audit/page";
+import UsersPage from "./users/page";
 
 const MEMBER_ID = "c1c1eb6e-1ef5-48e1-95da-51454965df91";
 const audit = {
@@ -99,25 +112,75 @@ beforeEach(() => {
   ]);
   mocks.listAssignments.mockResolvedValue([]);
   mocks.listAuditLogs.mockResolvedValue([audit]);
+  mocks.listLoginAccounts.mockResolvedValue({ total: 0, accounts: [] });
+  mocks.maintenanceStatus.mockResolvedValue(null);
+});
+
+describe("owner-only Discord account UI", () => {
+  it.each([null, { role: "viewer" }, { role: "admin" }])(
+    "blocks non-owner account queries",
+    async (session) => {
+      mocks.getSession.mockResolvedValue(session);
+      await expect(
+        UsersPage({ searchParams: Promise.resolve({}) }),
+      ).rejects.toThrow("redirect:");
+      expect(mocks.listLoginAccounts).not.toHaveBeenCalled();
+      expect(mocks.maintenanceStatus).not.toHaveBeenCalled();
+    },
+  );
+  it("shows account identity and last full completion independently of partial cleanup", async () => {
+    mocks.listLoginAccounts.mockResolvedValue({
+      total: 1,
+      accounts: [
+        {
+          id: MEMBER_ID,
+          discordUserId: "444444444444444444",
+          displayName: "표시명",
+          username: "discord-user",
+          role: "viewer",
+          status: "active",
+          membershipStatus: "member",
+          membershipCheckedAt: new Date(),
+          lastLoginAt: new Date(),
+          grantId: null,
+        },
+      ],
+    });
+    mocks.maintenanceStatus.mockResolvedValue({
+      status: "partial",
+      lastCompletedAt: new Date("2026-10-01T00:00:00Z"),
+      examined: 25,
+      suspended: 2,
+      failed: 1,
+    });
+    const html = renderToStaticMarkup(
+      await UsersPage({ searchParams: Promise.resolve({}) }),
+    );
+    for (const text of [
+      "표시명",
+      "discord-user",
+      "444444444444444444",
+      "마지막 전체 정리",
+      "일부 완료",
+      "확인 25명",
+      "정지 2명",
+      "오류 1회",
+      "관리자로 지정",
+    ])
+      expect(html).toContain(text);
+    expect(html).not.toContain("생년");
+    expect(html).not.toContain("비밀번호");
+    expect(mocks.listLoginAccounts).toHaveBeenCalledWith("", 50, 0);
+  });
 });
 
 describe("owner-only management UI", () => {
-  it("adds credential controls beside information editing and exposes the audit entry for owner", async () => {
+  it("exposes separate account permissions and audit entries for owner", async () => {
     const html = renderToStaticMarkup(await AdminPage());
-    expect(html).toContain("<th>정보 수정</th><th>관리자 권한</th>");
+    expect(html).toContain('href="/admin/users"');
     expect(html).toContain('href="/admin/audit"');
-    expect(html).toContain('data-owner="credentials"');
-    expect(html).toContain("관리자로 지정");
-    mocks.listMembers.mockResolvedValue([
-      {
-        id: MEMBER_ID,
-        name: "김길수",
-        birthYear: 1995,
-        accounts: [],
-        administrator: true,
-      },
-    ]);
-    expect(renderToStaticMarkup(await AdminPage())).toContain("지정 취소");
+    expect(html).toContain("사용자 권한");
+    expect(html).not.toContain('data-owner="credentials"');
   });
 
   it("preserves management for admin without querying or showing owner-only controls", async () => {
@@ -147,25 +210,15 @@ describe("owner-only management UI", () => {
 
 describe("protected deletion and independent administration pages", () => {
   it.each(["admin", "owner"])(
-    "shows deletion for non-administrators and protects active administrators for %s",
+    "shows independent game member deletion controls for %s",
     async (role) => {
       mocks.getSession.mockResolvedValue({ role });
       expect(renderToStaticMarkup(await AdminPage())).toContain(
         'data-management="delete"',
       );
-      mocks.listMembers.mockResolvedValue([
-        {
-          id: MEMBER_ID,
-          name: "김관리자",
-          birthYear: 1995,
-          accounts: [],
-          administrator: true,
-        },
-      ]);
-      const html = renderToStaticMarkup(await AdminPage());
-      expect(html).not.toContain('data-management="delete"');
-      expect(html).toContain("활성 관리자는 삭제할 수 없습니다.");
-      expect(html).toContain("서비스 오너가 관리자 지정을 취소");
+      expect(renderToStaticMarkup(await AdminPage())).not.toContain(
+        "활성 관리자는 삭제할 수 없습니다.",
+      );
     },
   );
 

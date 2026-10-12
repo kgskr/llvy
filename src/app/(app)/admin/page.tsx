@@ -11,8 +11,6 @@ import {
 import { riotId } from "@/lib/format";
 import { getSession } from "@/lib/session";
 
-import { CredentialControls } from "./credential-controls";
-
 import {
   AdminFeedbackProvider,
   DeleteMemberForm,
@@ -108,9 +106,14 @@ export default async function AdminPage({
       <div className="page-heading">
         <h1>관리</h1>
         {session.role === "owner" ? (
-          <Link href="/admin/audit" className="button button-secondary">
-            감사로그
-          </Link>
+          <div className="link-form">
+            <Link href="/admin/users" className="button button-secondary">
+              사용자 권한
+            </Link>
+            <Link href="/admin/audit" className="button button-secondary">
+              감사로그
+            </Link>
+          </div>
         ) : null}
       </div>
       <AdminFeedbackProvider>
@@ -132,7 +135,6 @@ export default async function AdminPage({
                     <th>생년</th>
                     <th>연결된 라이엇 계정</th>
                     <th>정보 수정</th>
-                    {session.role === "owner" ? <th>관리자 권한</th> : null}
                     <th>삭제</th>
                   </tr>
                 </thead>
@@ -174,30 +176,14 @@ export default async function AdminPage({
                           />
                         </details>
                       </td>
-                      {session.role === "owner" ? (
-                        <td>
-                          <CredentialControls
+                      <td>
+                        <details>
+                          <summary>삭제</summary>
+                          <DeleteMemberForm
                             memberId={member.id}
                             memberName={member.name}
-                            administrator={member.administrator}
                           />
-                        </td>
-                      ) : null}
-                      <td>
-                        {member.administrator ? (
-                          <p className="form-note">
-                            활성 관리자는 삭제할 수 없습니다. 서비스 오너가
-                            관리자 지정을 취소한 후 삭제하세요.
-                          </p>
-                        ) : (
-                          <details>
-                            <summary>삭제</summary>
-                            <DeleteMemberForm
-                              memberId={member.id}
-                              memberName={member.name}
-                            />
-                          </details>
-                        )}
+                        </details>
                       </td>
                     </tr>
                   ))}

@@ -13,6 +13,7 @@ export async function setGameExcluded(
   excluded: boolean,
 ): Promise<boolean> {
   const actor = await assertAdmin();
+  if (!isUuid(id) || typeof excluded !== "boolean") return false;
   return withActorTransaction(actor, async (tx) => {
     const [before] = await tx
       .select({ excludedAt: games.excludedAt })

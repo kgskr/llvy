@@ -1,5 +1,6 @@
 import { relations, sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
   check,
   date,
@@ -7,6 +8,8 @@ import {
   integer,
   jsonb,
   pgTable,
+  pgSequence,
+  primaryKey,
   text,
   timestamp,
   unique,
@@ -18,23 +21,30 @@ import {
  * Club members. The UUID is the member's stable primary identity; it must not
  * change when the name is edited or accounts are (un)linked.
  */
-export const members = pgTable("members", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  name: text("name").notNull(),
-  birthYear: integer("birth_year"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .defaultNow()
-    .notNull(),
-});
+export const members = pgTable(
+  "members",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name")
+      .generatedAlwaysAs(sql`llvy_normalize_search_v1(name)`)
+      .notNull(),
+    birthYear: integer("birth_year"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [index("members_normalized_name_idx").using("hash", t.normalizedName)],
+);
 
 /** Each grant has a new identity; revocation never revives old sessions. */
 export const adminCredentials = pgTable(
   "admin_credentials",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    memberId: uuid("member_id")
-      .notNull()
-      .references(() => members.id, { onDelete: "restrict" }),
+    memberId: uuid("member_id").references(() => members.id, {
+      onDelete: "set null",
+    }),
     keyHash: text("key_hash").notNull().unique(),
     issuedAt: timestamp("issued_at", { withTimezone: true })
       .defaultNow()
@@ -63,6 +73,9 @@ export const auditLogs = pgTable(
     actorRole: text("actor_role"),
     actorMemberId: uuid("actor_member_id"),
     actorCredentialId: uuid("actor_credential_id"),
+    actorAccountId: uuid("actor_account_id"),
+    actorDiscordUserId: text("actor_discord_user_id"),
+    actorAdminGrantId: uuid("actor_admin_grant_id"),
     actorName: text("actor_name"),
     action: text("action").notNull(),
     targetType: text("target_type").notNull(),
@@ -96,6 +109,13 @@ export const riotAccounts = pgTable(
     }),
     gameName: text("game_name").notNull(),
     tagLine: text("tag_line").notNull(),
+    normalizedGameName: text("normalized_game_name")
+      .generatedAlwaysAs(sql`llvy_normalize_search_v1(game_name)`)
+      .notNull(),
+    normalizedTagLine: text("normalized_tag_line")
+      .generatedAlwaysAs(sql`llvy_normalize_search_v1(tag_line)`)
+      .notNull(),
+    nameObservedAt: timestamp("name_observed_at", { withTimezone: true }),
     puuid: text("puuid"),
     firstSeenAt: timestamp("first_seen_at", { withTimezone: true })
       .defaultNow()
@@ -103,6 +123,10 @@ export const riotAccounts = pgTable(
     linkedAt: timestamp("linked_at", { withTimezone: true }),
   },
   (t) => [
+    index("riot_accounts_normalized_name_idx").using(
+      "hash",
+      t.normalizedGameName,
+    ),
     uniqueIndex("riot_accounts_puuid_key")
       .on(t.puuid)
       .where(sql`${t.puuid} is not null`),
@@ -208,6 +232,9 @@ export const pendingUploads = pgTable(
     actorRole: text("actor_role"),
     actorMemberId: uuid("actor_member_id"),
     actorCredentialId: uuid("actor_credential_id"),
+    actorAccountId: uuid("actor_account_id"),
+    actorDiscordUserId: text("actor_discord_user_id"),
+    actorAdminGrantId: uuid("actor_admin_grant_id"),
     actorName: text("actor_name"),
     pathname: text("pathname").notNull(),
     state: text("state").notNull().default("pending"),
@@ -226,6 +253,132 @@ export const requestBudgets = pgTable("request_budgets", {
   key: text("key").primaryKey(),
   count: integer("count").notNull(),
   resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+});
+
+/** Authentication identities deliberately have no game-member relationship. */
+export const authMembershipVersion = pgSequence("auth_membership_version_seq");
+export const authAccounts = pgTable(
+  "auth_accounts",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    discordUserId: text("discord_user_id").notNull().unique(),
+    username: text("username").notNull(),
+    displayName: text("display_name").notNull(),
+    registeredAt: timestamp("registered_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    status: text("status").default("active").notNull(),
+    suspendedAt: timestamp("suspended_at", { withTimezone: true }),
+    suspensionReason: text("suspension_reason"),
+    guildId: text("guild_id").notNull(),
+    membershipStatus: text("membership_status").default("member").notNull(),
+    membershipCheckedAt: timestamp("membership_checked_at", {
+      withTimezone: true,
+    }).notNull(),
+    membershipVersion: bigint("membership_version", { mode: "number" })
+      .default(0)
+      .notNull(),
+  },
+  (t) => [
+    check(
+      "auth_accounts_discord_id",
+      sql`${t.discordUserId} ~ '^[1-9][0-9]{0,19}$'`,
+    ),
+    check("auth_accounts_status", sql`${t.status} in ('active', 'suspended')`),
+    check(
+      "auth_accounts_profile_length",
+      sql`char_length(${t.username}) between 1 and 128 and char_length(${t.displayName}) between 1 and 128`,
+    ),
+    index("auth_accounts_reconcile_idx").on(t.guildId, t.status, t.id),
+  ],
+);
+/** No account/profile is created for a first-login rejection. Never expire
+ * this watermark while older provider results could still be delivered. */
+export const authMembershipDecisions = pgTable(
+  "auth_membership_decisions",
+  {
+    guildId: text("guild_id").notNull(),
+    discordUserId: text("discord_user_id").notNull(),
+    version: bigint("version", { mode: "number" }).notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.guildId, t.discordUserId] })],
+);
+
+export const adminGrants = pgTable(
+  "admin_grants",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => authAccounts.id, { onDelete: "restrict" }),
+    issuedBy: uuid("issued_by")
+      .notNull()
+      .references(() => authAccounts.id),
+    revokedBy: uuid("revoked_by").references(() => authAccounts.id),
+    issuedAt: timestamp("issued_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("admin_grants_active_account_idx")
+      .on(t.accountId)
+      .where(sql`${t.revokedAt} is null`),
+  ],
+);
+export const authSessions = pgTable(
+  "auth_sessions",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    referenceHash: text("reference_hash").notNull().unique(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => authAccounts.id),
+    guildId: text("guild_id").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("auth_sessions_account_idx").on(t.accountId),
+    index("auth_sessions_expiry_idx").on(t.expiresAt),
+  ],
+);
+export const oauthLoginAttempts = pgTable(
+  "oauth_login_attempts",
+  {
+    stateHash: text("state_hash").primaryKey(),
+    bindingHash: text("binding_hash").notNull(),
+    redirectTo: text("redirect_to").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  },
+  (t) => [index("oauth_login_attempts_expiry_idx").on(t.expiresAt)],
+);
+export const discordApiControls = pgTable("discord_api_controls", {
+  key: text("key").primaryKey(),
+  reason: text("reason"),
+  blockedUntil: timestamp("blocked_until", { withTimezone: true }),
+  probeOwner: uuid("probe_owner"),
+  probeUntil: timestamp("probe_until", { withTimezone: true }),
+  version: integer("version").default(0).notNull(),
+});
+export const authReconciliationRuns = pgTable("auth_reconciliation_runs", {
+  key: text("key").primaryKey(),
+  cursor: uuid("cursor"),
+  cycleStartedAt: timestamp("cycle_started_at", { withTimezone: true }),
+  lastCompletedAt: timestamp("last_completed_at", { withTimezone: true }),
+  leaseOwner: uuid("lease_owner"),
+  leaseUntil: timestamp("lease_until", { withTimezone: true }),
+  status: text("status").default("idle").notNull(),
+  examined: integer("examined").default(0).notNull(),
+  suspended: integer("suspended").default(0).notNull(),
+  failed: integer("failed").default(0).notNull(),
 });
 
 export const membersRelations = relations(members, ({ many }) => ({

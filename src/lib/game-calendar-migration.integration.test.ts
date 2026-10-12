@@ -120,7 +120,7 @@ describe("date-only migration from owner-managed access schema", () => {
             "SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations",
           )
         ).rows,
-      ).toEqual([{ count: 6 }]);
+      ).toEqual([{ count: journal.entries.length }]);
     } finally {
       await client.close();
       await rm(olderFolder, { recursive: true, force: true });

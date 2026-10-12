@@ -10,7 +10,7 @@ export default async function HomePage() {
     <section className="search-landing" aria-labelledby="search-landing-title">
       <h1 id="search-landing-title">LLVY</h1>
       <p className="search-landing-description">
-        함께한 게임을 롤 닉네임으로 찾아보세요.
+        모임원 이름이나 롤 닉네임으로 전적을 찾아보세요.
       </p>
       <NicknameSearchForm />
     </section>
