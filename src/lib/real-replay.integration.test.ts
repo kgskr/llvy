@@ -1,4 +1,4 @@
-import { ownerActor, ownerSession } from "@/test/actor";
+import { ownerActor } from "@/test/actor";
 import { createHash } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
 import { basename } from "node:path";
@@ -24,10 +24,16 @@ import type { IngestResult } from "./ingest";
 import type { CreatedPendingUpload } from "./pending-upload-store";
 import { parseRofl, type ParsedGame } from "./rofl/parser";
 
+const mocks = vi.hoisted(() => ({ token: undefined as string | undefined }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/db", async () => ({ db: (await import("@/test/database")).db }));
-vi.mock("@/lib/session", () => ({
-  getSession: vi.fn(async () => ownerSession),
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name: string) =>
+      name === "llvy_session" && mocks.token
+        ? { value: mocks.token }
+        : undefined,
+  }),
 }));
 vi.mock("@vercel/blob", () => ({ del: vi.fn(async () => {}) }));
 
@@ -44,6 +50,7 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
   let processReplay: typeof import("@/app/api/process/route").POST;
   let gameQueries: typeof import("./games");
   let memberQueries: typeof import("./members");
+  let memberMutations: typeof import("./member-mutations");
   let uploadStore: typeof import("./pending-upload-store");
   const fetchReplay = vi.fn<typeof fetch>();
   const authorizedUrls = new Set<string>();
@@ -63,17 +70,22 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
     // are imported only when an explicitly supplied local file is being tested.
     database = await import("@/test/database");
     await database.migrateTestDatabase();
-    [gameQueries, memberQueries, uploadStore] = await Promise.all([
-      import("./games"),
-      import("./members"),
-      import("./pending-upload-store"),
-    ]);
+    [gameQueries, memberQueries, memberMutations, uploadStore] =
+      await Promise.all([
+        import("./games"),
+        import("./members"),
+        import("./member-mutations"),
+        import("./pending-upload-store"),
+      ]);
     ({ POST: processReplay } = await import("@/app/api/process/route"));
   }, 30_000);
 
   beforeEach(async () => {
     await database.resetTestDatabase();
     vi.clearAllMocks();
+    vi.stubEnv("AUTH_SECRET", "replay-independent-signing-secret-32-bytes");
+    const { createTestSession } = await import("@/test/auth");
+    mocks.token = (await createTestSession("owner")).token;
     vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_replay-test_secret");
     vi.stubEnv("BLOB_ACCESS", "public");
     authorizedUrls.clear();
@@ -86,8 +98,8 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
         headers: { "content-length": String(bytes.byteLength) },
       });
     });
-    // There is no network fallback. Fetch, Blob deletion and session auth are
-    // mocked; pending state, parsing, ingestion and all queries are real.
+    // There is no network fallback. Fetch, Blob deletion and cookie transport
+    // are mocked; sessions, pending state, parsing, ingestion and queries are real.
     vi.stubGlobal("fetch", fetchReplay);
     // Database driver errors can contain bound player identities. Preserve a
     // generic failing assertion without printing those details to test output.
@@ -266,11 +278,11 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
     const accounts = await memberQueries.listUnlinkedAccounts();
     expect(accounts.length).toBe(parsed.participants.length);
     const account = accounts[0];
-    const memberId = await memberQueries.createMember(
+    const memberId = await memberMutations.createMember(
       "Replay test member",
       null,
     );
-    expect(await memberQueries.linkAccount(account.id, memberId)).toBe(true);
+    expect(await memberMutations.linkAccount(account.id, memberId)).toBe(true);
     const linkedDetail = await gameQueries.getGameDetail(result.gameId);
     const linked = linkedDetail?.participants.find(
       (participant) => participant.memberId === memberId,

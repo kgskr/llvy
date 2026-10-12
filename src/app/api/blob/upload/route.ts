@@ -34,7 +34,15 @@ function parseBindingPayload(
 }
 
 export async function POST(request: Request): Promise<NextResponse> {
-  const session = await getSession();
+  let session: Awaited<ReturnType<typeof getSession>>;
+  try {
+    session = await getSession();
+  } catch {
+    return NextResponse.json(
+      { error: "Authentication is unavailable." },
+      { status: 503, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }

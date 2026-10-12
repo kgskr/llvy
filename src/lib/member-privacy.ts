@@ -2,22 +2,7 @@ import "server-only";
 
 import type { SessionRole } from "@/lib/auth";
 
-export function maskMemberName(name: string): string {
-  const letters = [
-    ...new Intl.Segmenter("ko", { granularity: "grapheme" }).segment(
-      name.normalize("NFC"),
-    ),
-  ].map((part) => part.segment);
-  if (letters.length <= 1) return "*";
-  if (letters.length === 2) return `${letters[0]}*`;
-  return `${letters[0]}${"*".repeat(letters.length - 2)}${letters.at(-1)}`;
-}
-
-export function memberDisplayName(name: string, role: SessionRole): string {
-  return role === "viewer" ? maskMemberName(name) : name;
-}
-
-/** Original values are removed before returning to the rendering layer. */
+/** Preserve member names for all roles; omit birth years for viewers. */
 export function projectMember<
   T extends { name: string; birthYear?: number | null },
 >(
@@ -25,7 +10,5 @@ export function projectMember<
   role: SessionRole,
 ): Omit<T, "birthYear"> & { birthYear?: number | null } {
   const { birthYear, ...rest } = member;
-  return role === "viewer"
-    ? { ...rest, name: maskMemberName(member.name) }
-    : { ...rest, birthYear };
+  return role === "viewer" ? rest : { ...rest, birthYear };
 }

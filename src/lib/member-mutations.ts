@@ -1,18 +1,26 @@
 import "server-only";
 
-import { and, eq, isNull, isNotNull } from "drizzle-orm";
-import { adminCredentials, members, riotAccounts } from "@/db/schema";
+import { eq } from "drizzle-orm";
+import { members, riotAccounts } from "@/db/schema";
 import { appendAudit, withActorTransaction } from "@/lib/audit";
 import { assertAdmin } from "@/lib/session";
-import { isUuid } from "@/lib/validation";
+import { isUuid, validateMemberInput } from "@/lib/validation";
 
-export class ActiveAdministratorError extends Error {}
+function validatedMember(name: string, birthYear: number | null) {
+  const input = validateMemberInput(
+    name,
+    birthYear === null ? "" : String(birthYear),
+  );
+  if (!input.ok) throw new Error(input.error);
+  return { name: input.name, birthYear: input.birthYear };
+}
 
 export async function createMember(
   name: string,
   birthYear: number | null,
 ): Promise<string> {
   const actor = await assertAdmin();
+  ({ name, birthYear } = validatedMember(name, birthYear));
   return withActorTransaction(actor, async (tx) => {
     const [row] = await tx
       .insert(members)
@@ -34,6 +42,7 @@ export async function updateMember(
   birthYear: number | null,
 ): Promise<boolean> {
   const actor = await assertAdmin();
+  ({ name, birthYear } = validatedMember(name, birthYear));
   return withActorTransaction(actor, async (tx) => {
     const [before] = await tx
       .select({ name: members.name, birthYear: members.birthYear })
@@ -110,16 +119,6 @@ export async function deleteMember(id: string): Promise<boolean> {
       .where(eq(members.id, id))
       .for("update");
     if (!before) return false;
-    const [active] = await tx
-      .select({ id: adminCredentials.id })
-      .from(adminCredentials)
-      .where(
-        and(
-          eq(adminCredentials.memberId, id),
-          isNull(adminCredentials.revokedAt),
-        ),
-      );
-    if (active) throw new ActiveAdministratorError();
     const detached = await tx
       .update(riotAccounts)
       .set({ memberId: null, linkedAt: null })
@@ -134,14 +133,6 @@ export async function deleteMember(id: string): Promise<boolean> {
         after: { memberId: null, reason: "member_deleted" },
       });
     }
-    await tx
-      .delete(adminCredentials)
-      .where(
-        and(
-          eq(adminCredentials.memberId, id),
-          isNotNull(adminCredentials.revokedAt),
-        ),
-      );
     await tx.delete(members).where(eq(members.id, id));
     await appendAudit(tx, actor, {
       action: "member.deleted",

@@ -21,21 +21,31 @@ import {
   resetTestDatabase,
 } from "@/test/database";
 import { replayBytes, replayPlayer, tenReplayPlayers } from "@/test/replay";
+import { createMemberFixture } from "@/test/members";
 
+const mocks = vi.hoisted(() => ({ token: undefined as string | undefined }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/db", async () => ({ db: (await import("@/test/database")).db }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name: string) =>
+      name === "llvy_session" && mocks.token
+        ? { value: mocks.token }
+        : undefined,
+  }),
+}));
 
+import { createTestSession } from "@/test/auth";
 import { countGames, getGameDetail, listGames } from "./games";
 import { formatKoreaDateInput } from "./game-date";
 import { ingestReplay } from "./ingest";
 import {
   createMember,
   linkAccount,
-  listMembersWithAccounts,
-  listUnlinkedAccounts,
   unlinkAccount,
   updateMember,
-} from "./members";
+} from "./member-mutations";
+import { listMembersWithAccounts, listUnlinkedAccounts } from "./members";
 
 const playedAtInstant = new Date("2026-09-01T12:34:56.000Z");
 const playedAt = "2026-09-01";
@@ -67,13 +77,20 @@ async function rowCounts() {
 }
 
 beforeAll(migrateTestDatabase, 30_000);
-beforeEach(resetTestDatabase);
-afterEach(() => vi.restoreAllMocks());
+beforeEach(async () => {
+  await resetTestDatabase();
+  vi.stubEnv("AUTH_SECRET", "database-independent-signing-secret-32-bytes");
+  mocks.token = (await createTestSession("owner")).token;
+});
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
 afterAll(() => client.close());
 
 describe("stored migrations and replay ingestion", () => {
   it("reapplies the migration journal without losing existing data", async () => {
-    const memberId = await createMember("마이그레이션 확인", 1994);
+    const memberId = await createMemberFixture("마이그레이션 확인", 1994);
     await migrateTestDatabase();
     const rows = await db.select().from(members);
     expect(rows).toEqual([
@@ -454,7 +471,6 @@ describe("member identities and retroactive account links", () => {
         id: memberId,
         name: "새 이름",
         birthYear: null,
-        administrator: false,
         accounts: [{ id: account.id, gameName: "Player1", tagLine: "KR1" }],
       },
     ]);
@@ -660,7 +676,6 @@ describe("member identities and retroactive account links", () => {
         id: memberId,
         name: "아직 계정 없음",
         birthYear: null,
-        administrator: false,
         accounts: [],
       },
     ]);

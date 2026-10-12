@@ -20,7 +20,7 @@ export const LOGIN_THROTTLE_LIMITS: LoginThrottleLimits = {
 
 /** Shared daily reservation budget for this small club. */
 export const UPLOAD_BUDGET = {
-  perSession: 10,
+  perAccount: 10,
   global: 50,
   windowMs: 24 * 60 * 60 * 1000,
 } as const;

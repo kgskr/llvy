@@ -3,8 +3,10 @@ import type { Actor } from "@/lib/auth";
 export const ownerActor: Actor = {
   role: "owner",
   name: "서비스 오너",
-  memberId: null,
-  credentialId: null,
+  accountId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  discordUserId: "111111111111111111",
+  sessionId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  adminGrantId: null,
 };
 export const ownerSession = {
   ...ownerActor,
@@ -16,4 +18,7 @@ export const ownerUploadFields = {
   actorName: "서비스 오너",
   actorMemberId: null,
   actorCredentialId: null,
+  actorAccountId: ownerActor.accountId,
+  actorDiscordUserId: ownerActor.discordUserId,
+  actorAdminGrantId: null,
 };

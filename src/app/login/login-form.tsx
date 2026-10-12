@@ -1,35 +1,13 @@
-"use client";
-
-import { useActionState } from "react";
-
-import { login, type LoginState } from "./actions";
-
+import { sanitizeRedirect } from "@/lib/redirect";
 export function LoginForm({ redirectTo }: { redirectTo: string }) {
-  const [state, formAction, pending] = useActionState<LoginState, FormData>(
-    login,
-    null,
-  );
-
   return (
-    <form action={formAction} className="login-form">
-      <input type="hidden" name="redirectTo" value={redirectTo} />
-      <label htmlFor="password">접근 키</label>
+    <form action="/api/auth/discord" method="get" className="login-form">
       <input
-        id="password"
-        name="password"
-        type="password"
-        autoComplete="current-password"
-        autoFocus
-        required
+        type="hidden"
+        name="redirectTo"
+        value={sanitizeRedirect(redirectTo)}
       />
-      {state?.error ? (
-        <p className="form-error" role="alert">
-          {state.error}
-        </p>
-      ) : null}
-      <button type="submit" disabled={pending}>
-        {pending ? "확인 중…" : "입장"}
-      </button>
+      <button type="submit">Discord로 로그인</button>
     </form>
   );
 }

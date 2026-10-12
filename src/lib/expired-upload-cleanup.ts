@@ -6,7 +6,7 @@ import { and, eq, lt, ne, or } from "drizzle-orm";
 import { db } from "@/db";
 import { auditLogs, games, pendingUploads, requestBudgets } from "@/db/schema";
 import { appendAudit } from "@/lib/audit";
-import type { Actor } from "@/lib/auth";
+import type { AuditActorSnapshot } from "@/lib/auth";
 import { getBlobStoreConfig } from "@/lib/blob-store";
 
 const EXPIRY_GRACE_MS = 24 * 60 * 60 * 1000;
@@ -111,12 +111,15 @@ export async function reconcileExpiredUploads(): Promise<{
             .where(eq(games.blobUrl, canonicalUrl))
             .limit(1);
           const role = claimedRow.actorRole;
-          const actor: Actor | null =
+          const actor: AuditActorSnapshot | null =
             role === "admin" || role === "owner" || role === "viewer"
               ? {
                   role,
                   memberId: claimedRow.actorMemberId,
                   credentialId: claimedRow.actorCredentialId,
+                  accountId: claimedRow.actorAccountId,
+                  discordUserId: claimedRow.actorDiscordUserId,
+                  adminGrantId: claimedRow.actorAdminGrantId,
                   name:
                     claimedRow.actorName ??
                     (role === "owner"

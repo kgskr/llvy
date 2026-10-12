@@ -1,11 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import {
-  SESSION_COOKIE,
-  isAdminPath,
-  isOwnerPath,
-  readSessionToken,
-} from "@/lib/auth";
+import { SESSION_COOKIE, readSessionToken } from "@/lib/auth";
 
 export async function proxy(request: NextRequest) {
   const token = request.cookies.get(SESSION_COOKIE)?.value;
@@ -13,13 +8,6 @@ export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
   if (session) {
-    if (
-      (session.role === "viewer" &&
-        (isAdminPath(pathname) || pathname === "/upload")) ||
-      (session.role !== "owner" && isOwnerPath(pathname))
-    ) {
-      return NextResponse.redirect(new URL("/members", request.url));
-    }
     return NextResponse.next();
   }
 
@@ -41,6 +29,6 @@ export const config = {
   // Exclusions are anchored to a path-segment boundary so e.g. /login-foo is
   // NOT accidentally excluded from auth.
   matcher: [
-    "/((?!login$|login/|api/maintenance/uploads$|_next/static|_next/image|favicon\\.ico$).*)",
+    "/((?!login$|login/|api/auth/discord$|api/auth/discord/callback$|api/maintenance/uploads$|api/maintenance/auth$|_next/static|_next/image|favicon\\.ico$).*)",
   ],
 };

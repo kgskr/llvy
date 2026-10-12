@@ -14,6 +14,8 @@ import {
 
 import {
   adminCredentials,
+  adminGrants,
+  authAccounts,
   auditLogs,
   gameParticipants,
   games,
@@ -36,19 +38,15 @@ vi.mock("next/headers", () => ({
   }),
 }));
 
-import { createSessionToken } from "./auth";
-import {
-  authenticateAccessKey,
-  grantAdminCredential,
-  revokeAdminCredential,
-} from "./admin-credentials";
+import { createTestSession } from "@/test/auth";
+import { revokeAdministrator } from "./account-administration";
 import {
   setGameComment,
   setGameExcluded,
   setGamePlayedAt,
 } from "./game-mutations";
 import { getGameDetail, listGames } from "./games";
-import { ActiveAdministratorError, deleteMember } from "./member-mutations";
+import { deleteMember } from "./member-mutations";
 import {
   countMembers,
   countUnlinkedAccounts,
@@ -56,15 +54,13 @@ import {
   listMembersWithAccounts,
   listUnlinkedAccounts,
 } from "./members";
-import { ForbiddenError, UnauthorizedError } from "./session";
+import { ForbiddenError, getSession, UnauthorizedError } from "./session";
 
 beforeAll(migrateTestDatabase, 30_000);
 beforeEach(async () => {
   await resetTestDatabase();
-  vi.stubEnv("READ_PASSWORD", "refinement-viewer-key");
-  vi.stubEnv("OWNER_PASSWORD", "refinement-owner-private-key");
   vi.stubEnv("AUTH_SECRET", "independent-refinement-signing-secret-32-bytes");
-  mocks.token = await createSessionToken("owner");
+  mocks.token = (await createTestSession("owner")).token;
 });
 afterEach(() => vi.unstubAllEnvs());
 afterAll(() => client.close());
@@ -79,9 +75,8 @@ async function member(name = "김모임원") {
 
 async function administrator(name = "이관리자") {
   const row = await member(name);
-  const issued = await grantAdminCredential(row.id);
-  const actor = (await authenticateAccessKey(issued.key))!;
-  return { row, issued, actor, token: await createSessionToken(actor) };
+  const actor = await createTestSession("admin", { name });
+  return { row, actor, token: actor.token };
 }
 
 async function account(name: string, memberId: string | null = null) {
@@ -171,7 +166,9 @@ describe("protected permanent member deletion", () => {
       const stored = await game([main.id, alternate.id]);
       const before = await snapshot();
       mocks.token =
-        role === "admin" ? actor.token : await createSessionToken("owner");
+        role === "admin"
+          ? actor.token
+          : (await createTestSession("owner")).token;
       expect(await deleteMember(target.id)).toBe(true);
       expect(await countMembers()).toBe(1);
       expect((await db.select().from(members)).map((row) => row.id)).toEqual([
@@ -205,33 +202,45 @@ describe("protected permanent member deletion", () => {
   );
 
   it.each(["admin", "owner"] as const)(
-    "rejects %s deletion of an active administrator without changing any row",
+    "allows %s to delete a same-named game member without revoking login authority",
     async (role) => {
       const actor = await administrator();
       const target = await administrator("박대상");
       await account("Protected linked account", target.row.id);
       mocks.token =
-        role === "admin" ? actor.token : await createSessionToken("owner");
-      const before = await snapshot();
-      await expect(deleteMember(target.row.id)).rejects.toBeInstanceOf(
-        ActiveAdministratorError,
-      );
-      expect(await snapshot()).toEqual(before);
+        role === "admin"
+          ? actor.token
+          : (await createTestSession("owner")).token;
+      const beforeAccounts = await db.select().from(authAccounts);
+      const beforeGrants = await db.select().from(adminGrants);
+      expect(await deleteMember(target.row.id)).toBe(true);
+      expect(await db.select().from(authAccounts)).toEqual(beforeAccounts);
+      expect(await db.select().from(adminGrants)).toEqual(beforeGrants);
+      mocks.token = target.token;
+      expect(await getSession()).toMatchObject({ role: "admin" });
     },
   );
 
-  it("deletes a revoked administrator and its old credentials but preserves audit identity snapshots", async () => {
+  it("preserves retired credentials and audit snapshots when deleting a game member", async () => {
     const actor = await administrator();
     const target = await administrator("박이전관리자");
+    const [legacy] = await db
+      .insert(adminCredentials)
+      .values({
+        memberId: target.row.id,
+        keyHash: "a".repeat(64),
+        revokedAt: new Date(),
+      })
+      .returning();
     const linked = await account("Former admin account", target.row.id);
     const stored = await game([linked.id]);
-    expect(await revokeAdminCredential(target.row.id)).toBe(true);
+    expect(await revokeAdministrator(target.actor.accountId)).toBe(true);
     const before = await snapshot();
     mocks.token = actor.token;
     expect(await deleteMember(target.row.id)).toBe(true);
     const after = await snapshot();
-    expect(after.credentials.map((row) => row.memberId)).toEqual([
-      actor.row.id,
+    expect(after.credentials).toEqual([
+      expect.objectContaining({ id: legacy.id, memberId: null }),
     ]);
     expect(after.accountRows[0]).toMatchObject({
       id: linked.id,
@@ -244,7 +253,6 @@ describe("protected permanent member deletion", () => {
     expect(
       (await getGameDetail(stored.id))?.participants[0].memberName,
     ).toBeNull();
-    expect(await authenticateAccessKey(target.issued.key)).toBeNull();
     mocks.token = target.token;
     await expect(deleteMember(actor.row.id)).rejects.toBeInstanceOf(
       UnauthorizedError,
@@ -255,7 +263,7 @@ describe("protected permanent member deletion", () => {
     "rolls every delete side effect back when the %s audit fails",
     async (stage) => {
       const target = await administrator("박이전관리자");
-      await revokeAdminCredential(target.row.id);
+      await revokeAdministrator(target.actor.accountId);
       await account("Rollback main", target.row.id);
       await account("Rollback alternate", target.row.id);
       const before = await snapshot();
@@ -292,10 +300,10 @@ describe("protected permanent member deletion", () => {
       const actor = await administrator();
       const target = await member();
       await account("Unauthorized account", target.id);
-      if (kind === "revoked") await revokeAdminCredential(actor.row.id);
+      if (kind === "revoked") await revokeAdministrator(actor.actor.accountId);
       mocks.token =
         kind === "viewer"
-          ? await createSessionToken("viewer")
+          ? (await createTestSession("viewer")).token
           : kind === "revoked"
             ? actor.token
             : undefined;
@@ -389,7 +397,6 @@ describe("SQL member paging with complete accounts and options", () => {
         account(`Alt ${String(index).padStart(2, "0")}`, ids[0]),
       ),
     );
-    await grantAdminCredential(ids[11]);
     expect(await countMembers()).toBe(23);
     const all = await listMembersWithAccounts();
     const first = await listMembersWithAccounts(10, 0);
@@ -402,8 +409,7 @@ describe("SQL member paging with complete accounts and options", () => {
       many.map((row) => row.id),
     );
     expect(first[0].accounts).toHaveLength(17);
-    expect(second.find((row) => row.id === ids[11])?.administrator).toBe(true);
-    expect(first.every((row) => row.administrator === false)).toBe(true);
+    expect(all.every((row) => !("administrator" in row))).toBe(true);
     expect(await listMembersWithAccounts(10, 10)).toEqual(second);
     expect(await listMemberOptions()).toEqual(
       all.map(({ id, name }) => ({ id, name })),
@@ -422,7 +428,9 @@ describe("date-only corrections and shared game comments", () => {
       const actor = await administrator();
       const stored = await game();
       mocks.token =
-        role === "admin" ? actor.token : await createSessionToken("owner");
+        role === "admin"
+          ? actor.token
+          : (await createTestSession("owner")).token;
       const comment = ` ${"😀".repeat(28)} `;
       expect([...comment]).toHaveLength(30);
       expect(await setGameComment(stored.id, comment)).toBe(true);
@@ -487,10 +495,10 @@ describe("date-only corrections and shared game comments", () => {
     async (kind) => {
       const actor = await administrator();
       const stored = await game();
-      if (kind === "revoked") await revokeAdminCredential(actor.row.id);
+      if (kind === "revoked") await revokeAdministrator(actor.actor.accountId);
       mocks.token =
         kind === "viewer"
-          ? await createSessionToken("viewer")
+          ? (await createTestSession("viewer")).token
           : kind === "revoked"
             ? actor.token
             : undefined;

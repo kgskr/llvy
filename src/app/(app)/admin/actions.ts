@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 
 import {
-  ActiveAdministratorError,
   createMember,
   deleteMember,
   linkAccount,
@@ -30,13 +29,6 @@ async function runAdminAction(
       return {
         status: "error",
         message: "로그인이 만료되었습니다. 다시 로그인하세요.",
-      };
-    }
-    if (error instanceof ActiveAdministratorError) {
-      return {
-        status: "error",
-        message:
-          "활성 관리자는 삭제할 수 없습니다. 서비스 소유자에게 문의하세요.",
       };
     }
     console.error("Member administration failed", error);

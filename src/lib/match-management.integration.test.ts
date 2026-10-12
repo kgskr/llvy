@@ -17,6 +17,7 @@ import { drizzle } from "drizzle-orm/pglite";
 import { migrate } from "drizzle-orm/pglite/migrator";
 import {
   afterAll,
+  afterEach,
   beforeAll,
   beforeEach,
   describe,
@@ -34,19 +35,24 @@ import {
 } from "@/test/database";
 import { replayBytes, replayPlayer } from "@/test/replay";
 
+const mocks = vi.hoisted(() => ({ token: undefined as string | undefined }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/db", async () => ({ db: (await import("@/test/database")).db }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: (name: string) =>
+      name === "llvy_session" && mocks.token
+        ? { value: mocks.token }
+        : undefined,
+  }),
+}));
 
-import {
-  countGames,
-  getGameDetail,
-  listGames,
-  setGameExcluded,
-  setGamePlayedAt,
-} from "./games";
+import { createTestSession } from "@/test/auth";
+import { setGameExcluded, setGamePlayedAt } from "./game-mutations";
+import { countGames, getGameDetail, listGames } from "./games";
 import { ingestReplay } from "./ingest";
 import { getMemberHistory } from "./member-history";
-import { createMember, linkAccount, unlinkAccount } from "./members";
+import { createMember, linkAccount, unlinkAccount } from "./member-mutations";
 
 const day = (offset: number) =>
   new Date(Date.UTC(2026, 8, 1 + offset, 12)).toISOString().slice(0, 10);
@@ -100,7 +106,10 @@ beforeAll(migrateTestDatabase, 30_000);
 beforeEach(async () => {
   sequence = 0;
   await resetTestDatabase();
+  vi.stubEnv("AUTH_SECRET", "match-independent-signing-secret-32-bytes");
+  mocks.token = (await createTestSession("owner")).token;
 });
+afterEach(() => vi.unstubAllEnvs());
 afterAll(() => client.close());
 
 describe("match management persistence", () => {

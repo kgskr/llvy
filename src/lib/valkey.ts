@@ -51,7 +51,8 @@ function configuration() {
   return {
     url: value,
     tls: url.protocol === "rediss:" ? { servername: url.hostname } : undefined,
-    prefix: `${prefix}:${environment}:${digest}:v1`,
+    // v2 keeps previously masked member-name results out of current reads.
+    prefix: `${prefix}:${environment}:${digest}:v2`,
   };
 }
 

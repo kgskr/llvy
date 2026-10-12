@@ -11,7 +11,7 @@ export function matchesUploadActor(
     !!row &&
     actor.role !== "viewer" &&
     row.actorRole === actor.role &&
-    row.actorMemberId === actor.memberId &&
-    row.actorCredentialId === actor.credentialId
+    row.actorAccountId === actor.accountId &&
+    row.actorAdminGrantId === actor.adminGrantId
   );
 }

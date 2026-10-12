@@ -1,11 +1,11 @@
 import "server-only";
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { desc } from "drizzle-orm";
 
 import { db } from "@/db";
-import { adminCredentials, auditLogs } from "@/db/schema";
-import type { Actor } from "@/lib/auth";
-import { ForbiddenError, UnauthorizedError } from "@/lib/auth-errors";
+import { auditLogs } from "@/db/schema";
+import type { Actor, AuditActorSnapshot } from "@/lib/auth";
+import { lockActorAuthority } from "@/lib/authority";
 import { invalidateQueryCache } from "@/lib/query-cache";
 
 export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -61,13 +61,16 @@ function safeChanges(changes: AuditChanges | undefined) {
 
 export async function appendAudit(
   tx: DbTransaction,
-  actor: Actor | null,
+  actor: AuditActorSnapshot | null,
   event: AuditEvent,
 ): Promise<void> {
   await tx.insert(auditLogs).values({
     actorRole: actor?.role ?? null,
     actorMemberId: actor?.memberId ?? null,
     actorCredentialId: actor?.credentialId ?? null,
+    actorAccountId: actor?.accountId ?? null,
+    actorDiscordUserId: actor?.discordUserId ?? null,
+    actorAdminGrantId: actor?.adminGrantId ?? null,
     actorName: actor?.name ?? null,
     action: event.action,
     targetType: event.targetType,
@@ -80,7 +83,7 @@ export async function appendAudit(
 }
 
 export async function recordAudit(
-  actor: Actor | null,
+  actor: AuditActorSnapshot | null,
   event: AuditEvent,
 ): Promise<void> {
   await db.transaction((tx) => appendAudit(tx, actor, event));
@@ -91,20 +94,7 @@ export async function lockActor(
   tx: DbTransaction,
   actor: Actor,
 ): Promise<void> {
-  if (actor.role === "viewer") throw new ForbiddenError();
-  if (actor.role === "owner") return;
-  const [active] = await tx
-    .select({ id: adminCredentials.id })
-    .from(adminCredentials)
-    .where(
-      and(
-        eq(adminCredentials.id, actor.credentialId ?? ""),
-        eq(adminCredentials.memberId, actor.memberId ?? ""),
-        isNull(adminCredentials.revokedAt),
-      ),
-    )
-    .for("share");
-  if (!active) throw new UnauthorizedError();
+  await lockActorAuthority(tx, actor);
 }
 
 export async function withActorTransaction<T>(

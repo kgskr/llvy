@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ resolve: vi.fn(), assertSession: vi.fn() }));
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/nickname-search", () => ({
-  resolveNicknameMember: mocks.resolve,
+  resolveSearchMember: mocks.resolve,
 }));
 vi.mock("@/lib/session", () => ({ assertSession: mocks.assertSession }));
 vi.mock("next/navigation", () => ({
@@ -32,7 +32,10 @@ describe("exact nickname search routes", () => {
         searchParams: Promise.resolve({ nickname: "한글닉네임#KR1" }),
       }),
     ).rejects.toThrow(`redirect:/members/${MEMBER_ID}`);
-    expect(mocks.resolve).toHaveBeenCalledWith("한글닉네임#KR1");
+    expect(mocks.resolve).toHaveBeenCalledWith(
+      { mode: "nickname", input: "한글닉네임#KR1" },
+      1,
+    );
   });
 
   it.each(["nobody#KR1", "", ["duplicate", "params"]])(
@@ -45,23 +48,24 @@ describe("exact nickname search routes", () => {
     },
   );
 
-  it("shows projected member names and safely escaped nicknames for ambiguous matches", async () => {
+  it("shows full member names and safely escaped nicknames for viewer ambiguous matches", async () => {
     mocks.resolve.mockResolvedValue({
       kind: "ambiguous",
-      accounts: [
+      total: 22,
+      page: 1,
+      pageCount: 2,
+      members: [
         {
-          id: "one",
-          gameName: "<script>x</script>",
-          tagLine: "KR1",
-          memberId: MEMBER_ID,
-          memberName: "김*수",
+          kind: "member",
+          id: MEMBER_ID,
+          name: "김길수<script>",
+          accounts: [{ gameName: "<script>x</script>", tagLine: "KR1" }],
         },
         {
-          id: "two",
-          gameName: "<script>x</script>",
-          tagLine: "KR2",
-          memberId: MEMBER_ID,
-          memberName: "이*희",
+          kind: "member",
+          id: "22222222-2222-4222-8222-222222222222",
+          name: "이영희",
+          accounts: [],
         },
       ],
     });
@@ -70,13 +74,16 @@ describe("exact nickname search routes", () => {
         searchParams: Promise.resolve({ nickname: "<script>x</script>" }),
       }),
     );
-    expect(html).toContain("김*수의 전적 보기");
-    expect(html).toContain("이*희의 전적 보기");
+    expect(html).toContain("김길수&lt;script&gt;");
+    expect(html).toContain("이영희");
     expect(html).toContain(`href="/members/${MEMBER_ID}"`);
     expect(html).toContain("&lt;script&gt;x&lt;/script&gt;#KR1");
     expect(html).not.toContain("<script>x</script>");
     expect(html).not.toContain("birthYear");
-    expect(html).not.toContain("김길수");
+    expect(html).toContain("연결된 계정 없음");
+    expect(html).toContain("22명");
+    expect(html).toContain("nickname=%3Cscript%3Ex%3C%2Fscript%3E&amp;page=2");
+    expect(html).not.toContain("김*수");
   });
 
   it("does not disguise database outages as a missing-user result", async () => {
@@ -104,11 +111,11 @@ describe("exact nickname search routes", () => {
 
   it("renders a GET combobox with an enabled submit for nonempty text and preserves Unicode input", () => {
     const html = renderToStaticMarkup(
-      <NicknameSearchForm initialNickname="한글닉네임#KR1" />,
+      <NicknameSearchForm initialQuery="한글닉네임#KR1" />,
     );
     expect(html).toContain('role="combobox"');
     expect(html).toContain('aria-autocomplete="list"');
-    expect(html).toContain('name="nickname"');
+    expect(html).toContain('name="q"');
     expect(html).toContain('value="한글닉네임#KR1"');
     expect(html).toContain('<button type="submit">검색</button>');
     expect(html).not.toContain("검색 기능은 준비 중입니다.");
@@ -118,10 +125,34 @@ describe("exact nickname search routes", () => {
     const html = renderToStaticMarkup(<NicknameSearchForm />);
     expect(html).toContain('action="/search"');
     expect(html).toContain('method="get"');
-    expect(html).toMatch(
-      /<input(?=[^>]*name="nickname")(?=[^>]*required="")[^>]*>/,
-    );
+    expect(html).toMatch(/<input(?=[^>]*name="q")(?=[^>]*required="")[^>]*>/);
     expect(html).toContain('<button type="submit">검색</button>');
     expect(html).not.toContain("disabled");
   });
+});
+
+it("preserves unified queries in pagination and forwards repeated parameters as invalid", async () => {
+  mocks.resolve.mockResolvedValue({
+    kind: "ambiguous",
+    members: [],
+    total: 41,
+    page: 2,
+    pageCount: 3,
+  });
+  const html = renderToStaticMarkup(
+    await SearchPage({
+      searchParams: Promise.resolve({ q: "동명", page: "2" }),
+    }),
+  );
+  expect(html).toContain("q=%EB%8F%99%EB%AA%85&amp;page=1");
+  expect(html).toContain("q=%EB%8F%99%EB%AA%85&amp;page=3");
+  expect(mocks.resolve).toHaveBeenCalledWith(
+    { mode: "unified", input: "동명" },
+    2,
+  );
+  mocks.resolve.mockResolvedValue({ kind: "missing" });
+  await expect(
+    SearchPage({ searchParams: Promise.resolve({ q: "a", nickname: "b" }) }),
+  ).rejects.toThrow("redirect:/search/not-found");
+  expect(mocks.resolve).toHaveBeenLastCalledWith(null, 1);
 });

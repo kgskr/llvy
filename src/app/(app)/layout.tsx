@@ -44,6 +44,9 @@ export default async function AppLayout({
             <Link href="/games">게임</Link>
             <Link href="/members">모임원</Link>
             {isAdmin ? <Link href="/admin">관리</Link> : null}
+            {session.role === "owner" ? (
+              <Link href="/admin/users">사용자 권한</Link>
+            ) : null}
           </nav>
           <form action={logout} className="nav-account">
             <span className="nav-role">{roleLabel}</span>

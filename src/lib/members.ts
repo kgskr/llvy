@@ -3,24 +3,13 @@ import "server-only";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
-import {
-  adminCredentials,
-  gameParticipants,
-  games,
-  members,
-  riotAccounts,
-} from "@/db/schema";
-import { invalidateQueryCache } from "@/lib/query-cache";
+import { gameParticipants, games, members, riotAccounts } from "@/db/schema";
 
 export type MemberWithAccounts = {
   id: string;
   name: string;
   birthYear: number | null;
   accounts: { id: string; gameName: string; tagLine: string }[];
-};
-
-export type AdminMemberWithAccounts = MemberWithAccounts & {
-  administrator: boolean;
 };
 
 export type UnlinkedAccount = {
@@ -34,7 +23,7 @@ export type UnlinkedAccount = {
 export async function listMembersWithAccounts(
   limit?: number,
   offset = 0,
-): Promise<AdminMemberWithAccounts[]> {
+): Promise<MemberWithAccounts[]> {
   const selection = db
     .select()
     .from(members)
@@ -52,8 +41,6 @@ export async function listMembersWithAccounts(
       id: memberPage.id,
       name: memberPage.name,
       birthYear: memberPage.birthYear,
-      administrator: sql<boolean>`exists (select 1 from ${adminCredentials}
-        where ${adminCredentials.memberId} = ${memberPage.id} and ${adminCredentials.revokedAt} is null)`,
       accountId: riotAccounts.id,
       gameName: riotAccounts.gameName,
       tagLine: riotAccounts.tagLine,
@@ -67,7 +54,7 @@ export async function listMembersWithAccounts(
       asc(riotAccounts.id),
     );
 
-  const byMember = new Map<string, AdminMemberWithAccounts>();
+  const byMember = new Map<string, MemberWithAccounts>();
   for (const row of rows) {
     let member = byMember.get(row.id);
     if (!member) {
@@ -75,7 +62,6 @@ export async function listMembersWithAccounts(
         id: row.id,
         name: row.name,
         birthYear: row.birthYear,
-        administrator: row.administrator,
         accounts: [],
       };
       byMember.set(row.id, member);
@@ -153,55 +139,4 @@ export async function countUnlinkedAccounts(): Promise<number> {
     .innerJoin(games, eq(games.id, gameParticipants.gameId))
     .where(and(isNull(riotAccounts.memberId), isNull(games.excludedAt)));
   return row.total;
-}
-
-export async function createMember(
-  name: string,
-  birthYear: number | null,
-): Promise<string> {
-  const rows = await db
-    .insert(members)
-    .values({ name, birthYear })
-    .returning({ id: members.id });
-  await invalidateQueryCache();
-  return rows[0].id;
-}
-
-/** Edit member details without changing the identity used by linked accounts. */
-export async function updateMember(
-  id: string,
-  name: string,
-  birthYear: number | null,
-): Promise<boolean> {
-  const rows = await db
-    .update(members)
-    .set({ name, birthYear })
-    .where(eq(members.id, id))
-    .returning({ id: members.id });
-  if (rows.length) await invalidateQueryCache();
-  return rows.length > 0;
-}
-
-/** Link a Riot account to a member. Retroactively resolves past participants. */
-export async function linkAccount(
-  accountId: string,
-  memberId: string,
-): Promise<boolean> {
-  const rows = await db
-    .update(riotAccounts)
-    .set({ memberId, linkedAt: new Date() })
-    .where(eq(riotAccounts.id, accountId))
-    .returning({ id: riotAccounts.id });
-  if (rows.length) await invalidateQueryCache();
-  return rows.length > 0;
-}
-
-export async function unlinkAccount(accountId: string): Promise<boolean> {
-  const rows = await db
-    .update(riotAccounts)
-    .set({ memberId: null, linkedAt: null })
-    .where(eq(riotAccounts.id, accountId))
-    .returning({ id: riotAccounts.id });
-  if (rows.length) await invalidateQueryCache();
-  return rows.length > 0;
 }

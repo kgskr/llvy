@@ -20,13 +20,13 @@ export type CreatedPendingUpload = {
 export class UploadBudgetExceeded extends Error {}
 
 export async function createPendingUpload(
-  sessionToken: string,
+  _sessionToken: string,
   actor: Actor,
 ): Promise<CreatedPendingUpload> {
   const allowed = await consumeRequestBudgets([
     {
-      key: budgetKey("upload:session", sessionToken),
-      limit: UPLOAD_BUDGET.perSession,
+      key: budgetKey("upload:account", actor.accountId),
+      limit: UPLOAD_BUDGET.perAccount,
       windowMs: UPLOAD_BUDGET.windowMs,
     },
     {
@@ -46,8 +46,9 @@ export async function createPendingUpload(
       nonceHash: hashNonce(nonce),
       pathname,
       actorRole: actor.role,
-      actorMemberId: actor.memberId,
-      actorCredentialId: actor.credentialId,
+      actorAccountId: actor.accountId,
+      actorDiscordUserId: actor.discordUserId,
+      actorAdminGrantId: actor.adminGrantId,
       actorName: actor.name,
       expiresAt: new Date(Date.now() + PENDING_UPLOAD_TTL_MS),
     });

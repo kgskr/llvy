@@ -1,8 +1,12 @@
-import type { NicknameSuggestion } from "@/lib/nickname-search";
+import {
+  projectSearchSuggestion,
+  type SearchSuggestion,
+} from "@/lib/search-contract";
+import { riotId } from "@/lib/format";
 
 type Callbacks = {
   onLoading: () => void;
-  onSuggestions: (suggestions: NicknameSuggestion[]) => void;
+  onSuggestions: (suggestions: SearchSuggestion[]) => void;
   onError: () => void;
   onUnauthorized: () => void;
 };
@@ -19,7 +23,7 @@ export function scheduleNicknameAutocomplete(
     if (controller.signal.aborted) return;
     callbacks.onLoading();
     try {
-      const query = new URLSearchParams({ nickname: input });
+      const query = new URLSearchParams({ q: input });
       const response = await fetcher(`/api/search/autocomplete?${query}`, {
         signal: controller.signal,
         cache: "no-store",
@@ -38,20 +42,15 @@ export function scheduleNicknameAutocomplete(
           ? body.suggestions
           : null;
       if (!Array.isArray(suggestions)) throw new Error("Invalid suggestions");
-      const safe: NicknameSuggestion[] = [];
-      for (const entry of suggestions.slice(0, 10)) {
-        if (
-          !entry ||
-          typeof entry.id !== "string" ||
-          typeof entry.gameName !== "string" ||
-          typeof entry.tagLine !== "string"
-        )
-          throw new Error("Invalid suggestion");
-        safe.push({
-          id: entry.id,
-          gameName: entry.gameName,
-          tagLine: entry.tagLine,
-        });
+      const safe: SearchSuggestion[] = [];
+      if (suggestions.length > 10) throw new Error("Invalid suggestions");
+      const seen = new Set<string>();
+      for (const entry of suggestions) {
+        const projected = projectSearchSuggestion(entry);
+        if (!projected) throw new Error("Invalid suggestion");
+        const key = `${projected.kind}:${projected.id}`;
+        if (!seen.has(key)) safe.push(projected);
+        seen.add(key);
       }
       callbacks.onSuggestions(safe);
     } catch {
@@ -76,4 +75,10 @@ export function nextSuggestionIndex(
 
 export function nicknameSearchHref(nickname: string): string {
   return `/search?${new URLSearchParams({ nickname })}`;
+}
+
+export function suggestionHref(suggestion: SearchSuggestion): string {
+  return suggestion.kind === "member"
+    ? `/members/${suggestion.id}`
+    : nicknameSearchHref(riotId(suggestion.gameName, suggestion.tagLine));
 }

@@ -1,242 +1,164 @@
-/**
- * Three-role session signatures using Web Crypto, shared by Proxy and Actions.
- * Shared-role key rotation revokes its sessions; admin revocation is checked
- * against the credential database in the server data-access layer.
- */
-
+/** Cookie verification is optimistic; DB authority is checked in the DAL. */
 export const SESSION_COOKIE = "llvy_session";
-export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
-
-const encoder = new TextEncoder();
-const HKDF_SALT = "llvy-session-hkdf-v4";
-const HKDF_INFO = "llvy-session-hmac";
-
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 export type SessionRole = "viewer" | "admin" | "owner";
-export type SessionIdentity = {
+export type Actor = {
   role: SessionRole;
-  memberId: string | null;
-  credentialId: string | null;
+  accountId: string;
+  discordUserId: string;
+  sessionId: string;
+  adminGrantId: string | null;
+  name: string;
 };
-export type VerifiedSession = SessionIdentity & { issuedAt: number };
-export type Actor = SessionIdentity & { name: string };
-
+export type AuditActorSnapshot = {
+  role: SessionRole | "system";
+  name: string;
+  accountId?: string | null;
+  discordUserId?: string | null;
+  adminGrantId?: string | null;
+  memberId?: string | null;
+  credentialId?: string | null;
+};
+export type VerifiedSession = { reference: string; issuedAt: number };
 export class AuthConfigurationError extends Error {
   constructor() {
-    super("Invalid authentication configuration. Check the required secrets.");
+    super("Invalid authentication configuration. Check the required settings.");
     this.name = "AuthConfigurationError";
   }
 }
-
-function getAuthConfig() {
-  const viewer = process.env.READ_PASSWORD;
-  const owner = process.env.OWNER_PASSWORD;
+const encoder = new TextEncoder();
+export function isDiscordId(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    /^[1-9]\d{0,19}$/.test(value) &&
+    BigInt(value) <= BigInt("18446744073709551615")
+  );
+}
+export function getAuthorityConfig() {
   const secret = process.env.AUTH_SECRET?.trim();
+  const guildId = process.env.DISCORD_GUILD_ID?.trim();
+  const ownerUserId = process.env.DISCORD_OWNER_USER_ID?.trim();
   if (
-    !viewer?.trim() ||
-    !owner?.trim() ||
-    viewer === owner ||
     !secret ||
     encoder.encode(secret).length < 32 ||
-    secret === viewer ||
-    secret === owner
-  ) {
+    !isDiscordId(guildId) ||
+    !isDiscordId(ownerUserId)
+  )
     throw new AuthConfigurationError();
-  }
-  return { secret, passwords: { viewer, owner, admin: "" } };
+  return { secret, guildId, ownerUserId };
 }
-
-// At most three entries, so rotations do not retain an unbounded secret history.
-const signingKeyCache = new Map<
-  SessionRole,
-  { secret: string; password: string; key: Promise<CryptoKey> }
->();
-
-function getSigningKey(role: SessionRole): Promise<CryptoKey> {
-  const { secret, passwords } = getAuthConfig();
-  const password = passwords[role];
-  const cached = signingKeyCache.get(role);
-  if (cached?.secret === secret && cached.password === password) {
-    return cached.key;
-  }
-  const key = deriveSigningKey(secret, password, role);
-  signingKeyCache.set(role, { secret, password, key });
+let signingKeyCache: { secret: string; key: Promise<CryptoKey> } | undefined;
+function signingKey() {
+  const { secret } = getAuthorityConfig();
+  if (signingKeyCache?.secret === secret) return signingKeyCache.key;
+  const key = (async () => {
+    const ikm = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(secret),
+      "HKDF",
+      false,
+      ["deriveKey"],
+    );
+    return crypto.subtle.deriveKey(
+      {
+        name: "HKDF",
+        hash: "SHA-256",
+        salt: encoder.encode("llvy-session-hkdf-v5"),
+        info: encoder.encode("llvy-session-hmac"),
+      },
+      ikm,
+      { name: "HMAC", hash: "SHA-256", length: 256 },
+      false,
+      ["sign", "verify"],
+    );
+  })();
+  signingKeyCache = { secret, key };
   return key;
 }
-
-async function deriveSigningKey(
-  secret: string,
-  password: string,
-  role: SessionRole,
-): Promise<CryptoKey> {
-  const ikm = await crypto.subtle.importKey(
-    "raw",
-    encoder.encode(secret),
-    "HKDF",
-    false,
-    ["deriveKey"],
-  );
-  return crypto.subtle.deriveKey(
-    {
-      name: "HKDF",
-      hash: "SHA-256",
-      salt: encoder.encode(JSON.stringify([HKDF_SALT, role, password])),
-      info: encoder.encode(HKDF_INFO),
-    },
-    ikm,
-    { name: "HMAC", hash: "SHA-256", length: 256 },
-    false,
-    ["sign", "verify"],
-  );
-}
-
-function toBase64Url(buffer: ArrayBuffer): string {
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary)
+function encode(bytes: Uint8Array): string {
+  return btoa(Array.from(bytes, (x) => String.fromCharCode(x)).join(""))
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
 }
-
-function fromBase64Url(value: string): Uint8Array<ArrayBuffer> {
-  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
-  const binary = atob(base64);
-  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
-  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
-  return bytes;
+function decode(value: string): Uint8Array<ArrayBuffer> {
+  return Uint8Array.from(
+    atob(value.replace(/-/g, "+").replace(/_/g, "/")),
+    (c) => c.charCodeAt(0),
+  );
 }
-
-function timingSafeEqual(a: string, b: string): boolean {
-  const left = encoder.encode(a);
-  const right = encoder.encode(b);
-  if (left.length !== right.length) return false;
-  let diff = 0;
-  for (let i = 0; i < left.length; i += 1) diff |= left[i] ^ right[i];
-  return diff === 0;
+export function randomReference(): string {
+  return encode(crypto.getRandomValues(new Uint8Array(32)));
 }
-
-/** The server selects the role; caller-supplied roles never participate. */
-export function authenticatePassword(input: string): "viewer" | "owner" | null {
-  const { passwords } = getAuthConfig();
-  const viewer = timingSafeEqual(input, passwords.viewer);
-  const owner = timingSafeEqual(input, passwords.owner);
-  if (owner) return "owner";
-  return viewer ? "viewer" : null;
-}
-
-/** Create a signed session token to store in the session cookie. */
-export async function createSessionToken(
-  identity: SessionIdentity | "viewer" | "owner",
-): Promise<string> {
-  const { role, memberId, credentialId } =
-    typeof identity === "string"
-      ? { role: identity, memberId: null, credentialId: null }
-      : identity;
-  if (
-    (role !== "viewer" && role !== "admin" && role !== "owner") ||
-    (role === "admin"
-      ? !isSessionUuid(memberId) || !isSessionUuid(credentialId)
-      : memberId !== null || credentialId !== null)
-  ) {
-    throw new Error("Invalid session role");
+export function isReference(value: unknown): value is string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(value))
+    return false;
+  try {
+    return encode(decode(value)) === value;
+  } catch {
+    return false;
   }
-  const payload = `v4.${role}.${Date.now()}.${crypto.randomUUID()}.${memberId ?? "-"}.${credentialId ?? "-"}`;
-  const key = await getSigningKey(role);
+}
+export async function createSessionToken(
+  reference: string,
+  issuedAt = Date.now(),
+): Promise<string> {
+  if (!isReference(reference) || !Number.isSafeInteger(issuedAt))
+    throw new Error("Invalid session reference");
+  const payload = "v5." + issuedAt + "." + reference;
   const signature = await crypto.subtle.sign(
     "HMAC",
-    key,
+    await signingKey(),
     encoder.encode(payload),
   );
-  return `${payload}.${toBase64Url(signature)}`;
+  return payload + "." + encode(new Uint8Array(signature));
 }
-
-/** Read a role only after verifying its entire signed payload and current key. */
 export async function readSessionToken(
-  token: string | undefined | null,
+  token: string | null | undefined,
 ): Promise<VerifiedSession | null> {
-  if (!token || token.length > 256) return null;
+  if (!token || token.length > 200) return null;
   const parts = token.split(".");
-  if (parts.length !== 7) return null;
-  const [
-    version,
-    role,
-    timestamp,
-    nonce,
-    memberPart,
-    credentialPart,
-    signaturePart,
-  ] = parts;
+  const [version, timestamp, reference, signature] = parts;
   if (
-    version !== "v4" ||
-    (role !== "viewer" && role !== "admin" && role !== "owner") ||
-    (role === "admin"
-      ? !isSessionUuid(memberPart) || !isSessionUuid(credentialPart)
-      : memberPart !== "-" || credentialPart !== "-") ||
+    parts.length !== 4 ||
+    version !== "v5" ||
     !/^\d{1,16}$/.test(timestamp) ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
-      nonce,
-    ) ||
-    !/^[A-Za-z0-9_-]{43}$/.test(signaturePart)
-  ) {
+    !isReference(reference) ||
+    !isReference(signature)
+  )
     return null;
-  }
-
   const issuedAt = Number(timestamp);
-  const now = Date.now();
   if (
     !Number.isSafeInteger(issuedAt) ||
-    issuedAt > now + 60_000 ||
-    now - issuedAt > SESSION_MAX_AGE_SECONDS * 1000
-  ) {
+    issuedAt > Date.now() + 60_000 ||
+    Date.now() - issuedAt >= SESSION_MAX_AGE_SECONDS * 1000
+  )
     return null;
-  }
-
   try {
-    const signature = fromBase64Url(signaturePart);
-    // Reject base64 aliases so one session has one identity for upload budgets.
-    if (toBase64Url(signature.buffer) !== signaturePart) return null;
-    const key = await getSigningKey(role);
-    const valid = await crypto.subtle.verify(
+    return (await crypto.subtle.verify(
       "HMAC",
-      key,
-      signature,
-      encoder.encode(parts.slice(0, 6).join(".")),
-    );
-    return valid
-      ? {
-          role,
-          issuedAt,
-          memberId: role === "admin" ? memberPart : null,
-          credentialId: role === "admin" ? credentialPart : null,
-        }
+      await signingKey(),
+      decode(signature),
+      encoder.encode(parts.slice(0, 3).join(".")),
+    ))
+      ? { reference, issuedAt }
       : null;
   } catch (error) {
     if (error instanceof AuthConfigurationError) return null;
     throw error;
   }
 }
-
-/** Boolean compatibility for upload handlers and existing authenticated reads. */
-export async function verifySessionToken(
-  token: string | undefined | null,
-): Promise<boolean> {
+export async function verifySessionToken(token: string | null | undefined) {
   return (await readSessionToken(token)) !== null;
 }
-
-export function isAdminPath(pathname: string): boolean {
-  return pathname === "/admin" || pathname.startsWith("/admin/");
+export function isAdminPath(path: string) {
+  return path === "/admin" || path.startsWith("/admin/");
 }
-
-export function isOwnerPath(pathname: string): boolean {
-  return pathname === "/admin/audit" || pathname.startsWith("/admin/audit/");
-}
-
-export function isSessionUuid(value: string | null): value is string {
+export function isOwnerPath(path: string) {
   return (
-    typeof value === "string" &&
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
-      value,
-    )
+    path === "/admin/audit" ||
+    path.startsWith("/admin/audit/") ||
+    path === "/admin/users" ||
+    path.startsWith("/admin/users/")
   );
 }

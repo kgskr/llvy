@@ -6,6 +6,7 @@ import {
   UploadBudgetExceeded,
 } from "@/lib/pending-upload-store";
 import { getSession } from "@/lib/session";
+import { ForbiddenError, UnauthorizedError } from "@/lib/auth-errors";
 
 // Issues a pending-upload binding: the unguessable { uploadId, nonce } pair the
 // client must present to /api/blob/upload (token minting) and /api/process
@@ -17,7 +18,15 @@ type UploadsBody = { filename?: unknown };
 
 export async function POST(request: Request): Promise<NextResponse> {
   // Independent auth check (defense-in-depth beyond the proxy).
-  const session = await getSession();
+  let session: Awaited<ReturnType<typeof getSession>>;
+  try {
+    session = await getSession();
+  } catch {
+    return NextResponse.json(
+      { error: "Authentication is unavailable." },
+      { status: 503, headers: { "Cache-Control": "private, no-store" } },
+    );
+  }
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
@@ -69,7 +78,19 @@ export async function POST(request: Request): Promise<NextResponse> {
         { status: 429 },
       );
     }
-    throw error;
+    if (error instanceof UnauthorizedError || error instanceof ForbiddenError) {
+      return NextResponse.json(
+        {
+          error:
+            error instanceof UnauthorizedError ? "Unauthorized" : "Forbidden",
+        },
+        { status: error instanceof UnauthorizedError ? 401 : 403 },
+      );
+    }
+    return NextResponse.json(
+      { error: "Upload reservation is unavailable." },
+      { status: 503, headers: { "Cache-Control": "private, no-store" } },
+    );
   }
   // Expose only the store's access mode, never its read/write credential.
   return NextResponse.json({ ...created, access });

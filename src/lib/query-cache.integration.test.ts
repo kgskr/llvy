@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   afterAll,
   afterEach,
@@ -9,7 +9,14 @@ import {
   it,
   vi,
 } from "vitest";
-import { gameParticipants, games, members, riotAccounts } from "@/db/schema";
+import {
+  authAccounts,
+  authSessions,
+  gameParticipants,
+  games,
+  members,
+  riotAccounts,
+} from "@/db/schema";
 import {
   client as postgres,
   db,
@@ -20,6 +27,17 @@ import { replayBytes } from "@/test/replay";
 import { ownerActor } from "@/test/actor";
 
 const mocks = vi.hoisted(() => ({ token: undefined as string | undefined }));
+function businessSelectCount(calls: unknown[][]) {
+  return calls.filter(
+    ([fields]) =>
+      !(
+        fields &&
+        typeof fields === "object" &&
+        "account" in fields &&
+        fields.account === authAccounts
+      ),
+  ).length;
+}
 vi.mock("server-only", () => ({}));
 vi.mock("@/db", async () => ({ db: (await import("@/test/database")).db }));
 vi.mock("next/headers", () => ({
@@ -31,12 +49,8 @@ vi.mock("next/navigation", () => ({
   },
 }));
 
-import { createSessionToken } from "./auth";
-import {
-  authenticateAccessKey,
-  grantAdminCredential,
-  revokeAdminCredential,
-} from "./admin-credentials";
+import { createTestSession } from "@/test/auth";
+import { revokeAdministrator } from "./account-administration";
 import { withActorTransaction } from "./audit";
 import { ingestReplay } from "./ingest";
 import {
@@ -45,12 +59,15 @@ import {
   setGamePlayedAt,
 } from "./game-mutations";
 import {
+  createMember,
   deleteMember,
   linkAccount,
   unlinkAccount,
   updateMember,
 } from "./member-mutations";
 import {
+  autocompleteSearch,
+  resolveSearchMember,
   autocompleteStoredNicknames,
   normalizeNicknameSearch,
   resolveNicknameMember,
@@ -69,6 +86,12 @@ import {
 } from "./read-model";
 import { disconnectValkey, getValkeyConnection } from "./valkey";
 import type Redis from "ioredis";
+import { createAutocompleteIndex } from "./autocomplete-index";
+import {
+  memberIndexKey,
+  projectSearchSuggestion,
+  type MemberSuggestion,
+} from "./search-contract";
 
 // Explicit opt-in: never derive this endpoint from the production VALKEY_URL.
 const testUrl = process.env.LLVY_VALKEY_TEST_URL;
@@ -96,10 +119,8 @@ describe.skipIf(!testUrl)(
         "POSTGRES_URL",
         "postgres://fixture:fixture@fixture.invalid/disposable",
       );
-      vi.stubEnv("READ_PASSWORD", "cache-viewer-fixture");
-      vi.stubEnv("OWNER_PASSWORD", "cache-owner-fixture");
       vi.stubEnv("AUTH_SECRET", "independent-cache-signing-secret-32-bytes");
-      mocks.token = await createSessionToken("owner");
+      mocks.token = (await createTestSession("owner")).token;
       const connection = await getValkeyConnection();
       expect(connection).not.toBeNull();
       valkey = connection!.client;
@@ -163,6 +184,221 @@ describe.skipIf(!testUrl)(
       });
       return { member, account, game };
     }
+
+    it("uses separate minimal member and account indices with warm reuse, expiry and partial-eviction recovery", async () => {
+      const fixture = await seed("김계정");
+      const expected = [
+        {
+          kind: "member",
+          id: fixture.member.id,
+          name: "김모임원",
+          accounts: [{ gameName: "김계정", tagLine: "KR1" }],
+        },
+        {
+          kind: "riot-account",
+          id: fixture.account.id,
+          gameName: "김계정",
+          tagLine: "KR1",
+        },
+      ];
+      expect(await autocompleteSearch("김")).toEqual(expected);
+      const generation = await valkey.get(`${prefix}:generation`);
+      const memberKey = `${prefix}:${generation}:member-autocomplete:v1`;
+      const accountKey = `${prefix}:${generation}:autocomplete:v1`;
+      for (const key of [memberKey, accountKey]) {
+        for (const suffix of ["names", "accounts", "ready"])
+          expect(await valkey.ttl(`${key}:${suffix}`)).toBeGreaterThanOrEqual(
+            58,
+          );
+      }
+      const stored = await valkey.hgetall(`${memberKey}:accounts`);
+      expect(Object.values(stored).map((value) => JSON.parse(value))).toEqual([
+        expected[0],
+      ]);
+      const select = vi.spyOn(db, "select");
+      expect(await autocompleteSearch("김")).toEqual(expected);
+      expect(businessSelectCount(select.mock.calls)).toBe(0);
+      const field = Object.keys(stored)[0];
+      await valkey.hset(
+        `${memberKey}:accounts`,
+        field,
+        JSON.stringify({
+          ...expected[0],
+          birthYear: 1990,
+          discordUserId: "secret",
+        }),
+      );
+      expect(await autocompleteSearch("김")).toEqual(expected);
+      await valkey.hset(`${memberKey}:accounts`, field, "broken JSON");
+      expect(await autocompleteSearch("김")).toEqual(expected);
+      await valkey.del(`${memberKey}:names`);
+      expect(await autocompleteSearch("김")).toEqual(expected);
+      await valkey.pexpire(`${memberKey}:ready`, 1);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      select.mockClear();
+      expect(await autocompleteSearch("김")).toEqual(expected);
+      expect(businessSelectCount(select.mock.calls)).toBe(1);
+      disconnectValkey();
+      vi.stubEnv("VALKEY_URL", "");
+      expect(await autocompleteSearch("김")).toEqual(expected);
+    });
+
+    it("invalidates member names and previews only after committed member/account/game mutations", async () => {
+      const fixture = await seed("김계정");
+      await autocompleteSearch("김");
+      const added = await createMember("김신규", 1995);
+      expect((await autocompleteSearch("김신규"))[0]).toMatchObject({
+        id: added,
+        accounts: [],
+      });
+      await updateMember(added, "이변경", 1995);
+      expect(await autocompleteSearch("김신규")).toEqual([]);
+      expect((await autocompleteSearch("이변경"))[0].id).toBe(added);
+      await linkAccount(fixture.account.id, added);
+      expect((await autocompleteSearch("김모임원"))[0]).toMatchObject({
+        accounts: [],
+      });
+      expect((await autocompleteSearch("이변경"))[0]).toMatchObject({
+        accounts: [{ gameName: "김계정", tagLine: "KR1" }],
+      });
+      await withActorTransaction(ownerActor, async (tx) => {
+        const { eq } = await import("drizzle-orm");
+        await tx
+          .update(riotAccounts)
+          .set({ gameName: "새계정" })
+          .where(eq(riotAccounts.id, fixture.account.id));
+        return true;
+      });
+      expect((await autocompleteSearch("이변경"))[0]).toMatchObject({
+        accounts: [{ gameName: "새계정", tagLine: "KR1" }],
+      });
+      await setGameExcluded(fixture.game.id, true);
+      expect(await autocompleteSearch("새계정")).toEqual([]);
+      expect((await autocompleteSearch("이변경"))[0].id).toBe(added);
+      await setGameExcluded(fixture.game.id, false);
+      expect((await autocompleteSearch("새계정"))[0]).toMatchObject({
+        kind: "riot-account",
+      });
+      await unlinkAccount(fixture.account.id);
+      expect((await autocompleteSearch("이변경"))[0]).toMatchObject({
+        accounts: [],
+      });
+      const generation = await valkey.get(`${prefix}:generation`);
+      await expect(
+        withActorTransaction(ownerActor, async (tx) => {
+          await tx.insert(members).values({ name: "롤백모임원" });
+          throw new Error("rollback");
+        }),
+      ).rejects.toThrow("rollback");
+      expect(await valkey.get(`${prefix}:generation`)).toBe(generation);
+      expect(await autocompleteSearch("롤백")).toEqual([]);
+      await deleteMember(added);
+      expect(await autocompleteSearch("이변경")).toEqual([]);
+      expect((await getMemberHistoryReadModel(added)).history).toBeNull();
+    });
+
+    it("does not trust warmed name suggestions for final resolution or revoked credentials", async () => {
+      const fixture = await seed("김계정");
+      await getMemberHistoryReadModel(fixture.member.id);
+      const ownerToken = mocks.token;
+      const admin = await createTestSession("admin");
+      mocks.token = admin.token;
+      await autocompleteSearch("김");
+      const { eq } = await import("drizzle-orm");
+      await db
+        .update(members)
+        .set({ name: "현재이름" })
+        .where(eq(members.id, fixture.member.id));
+      expect((await autocompleteSearch("김모임원"))[0]).toMatchObject({
+        name: "김모임원",
+      });
+      expect(
+        await resolveSearchMember({ mode: "unified", input: "김모임원" }),
+      ).toEqual({ kind: "missing" });
+      expect(
+        await resolveSearchMember({ mode: "unified", input: "현재이름" }),
+      ).toEqual({ kind: "member", memberId: fixture.member.id });
+      mocks.token = ownerToken;
+      expect(
+        (await getMemberHistoryReadModel(fixture.member.id)).history?.member
+          .name,
+      ).toBe("현재이름");
+      await db.delete(members).where(eq(members.id, fixture.member.id));
+      expect(
+        (await getMemberHistoryReadModel(fixture.member.id)).history,
+      ).toBeNull();
+      await revokeAdministrator(admin.accountId);
+      mocks.token = admin.token;
+      await expect(autocompleteSearch("김")).rejects.toThrow("Unauthorized");
+      const viewer = await createTestSession("viewer");
+      mocks.token = viewer.token;
+      await autocompleteSearch("현재");
+      await db
+        .delete(authSessions)
+        .where(eq(authSessions.id, viewer.sessionId));
+      await expect(autocompleteSearch("현재")).rejects.toThrow("Unauthorized");
+    });
+
+    it("coalesces member builds and publishes a late snapshot only into its captured generation", async () => {
+      const query = createAutocompleteIndex<MemberSuggestion>({
+        namespace: "member-autocomplete:v1",
+        indexedName: memberIndexKey,
+        project(value) {
+          const safe = projectSearchSuggestion(value);
+          return safe?.kind === "member" ? safe : null;
+        },
+      });
+      let finish!: (members: MemberSuggestion[]) => void;
+      let started!: () => void;
+      const began = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      const pending = new Promise<MemberSuggestion[]>((resolve) => {
+        finish = resolve;
+      });
+      const load = vi.fn(() => {
+        started();
+        return pending;
+      });
+      const first = query("김", load);
+      await began;
+      const second = query("김옛", load);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(
+        (await keys()).some((key) => key.includes(":member-autocomplete:")),
+      ).toBe(false);
+      const generation = await valkey.get(`${prefix}:generation`);
+      await invalidateQueryCache();
+      finish([
+        { kind: "member", id: randomUUID(), name: "김옛이름", accounts: [] },
+      ]);
+      expect((await first)[0].name).toBe("김옛이름");
+      expect((await second)[0].name).toBe("김옛이름");
+      expect(load).toHaveBeenCalledOnce();
+      expect(
+        await valkey.exists(
+          `${prefix}:${generation}:member-autocomplete:v1:ready`,
+        ),
+      ).toBe(1);
+      const current = vi
+        .fn()
+        .mockResolvedValue([
+          { kind: "member", id: randomUUID(), name: "김현재", accounts: [] },
+        ]);
+      expect((await query("김", current))[0].name).toBe("김현재");
+      expect((await query("김", current))[0].name).toBe("김현재");
+      expect(current).toHaveBeenCalledOnce();
+    });
+
+    it("returns the same mixed candidates after a Valkey command failure", async () => {
+      await seed("김계정");
+      const expected = await autocompleteSearch("김");
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      vi.spyOn(valkey, "eval").mockRejectedValueOnce(
+        new Error("fixture cache failure"),
+      );
+      expect(await autocompleteSearch("김")).toEqual(expected);
+    });
 
     it("stores hits including null and expires entries with a real TTL", async () => {
       const load = vi.fn().mockResolvedValue(null);
@@ -270,18 +506,22 @@ describe.skipIf(!testUrl)(
     it("projects viewer data before caching while retaining live session checks", async () => {
       const { member, game } = await seed();
       await getMembersReadModel();
-      mocks.token = await createSessionToken("viewer");
+      mocks.token = (await createTestSession("viewer")).token;
       const read = await getMembersReadModel();
       const history = await getMemberHistoryReadModel(member.id);
       const detail = await getGameDetailReadModel(game.id);
-      expect(read.members[0].name).toBe("김**원");
+      expect(read.members[0].name).toBe(member.name);
+      expect(read.members[0]).not.toHaveProperty("birthYear");
+      expect(history.history?.member.name).toBe(member.name);
       expect(history.history?.member).not.toHaveProperty("birthYear");
-      expect(detail.game?.participants[0].memberName).toBe("김**원");
+      expect(detail.game?.participants[0].memberName).toBe(member.name);
+      expect(await getMembersReadModel()).toEqual(read);
       for (const key of (await dataKeys()).filter((key) =>
         key.includes(":viewer:"),
       )) {
         const stored = (await valkey.get(key))!;
-        expect(stored).not.toContain("김모임원");
+        expect(stored).toContain(member.name);
+        expect(stored).not.toContain("김**원");
         expect(stored).not.toContain("birthYear");
       }
       mocks.token = undefined;
@@ -290,16 +530,41 @@ describe.skipIf(!testUrl)(
       expect(get).not.toHaveBeenCalled();
     });
 
-    it("denies a revoked administrator before looking up warmed query data", async () => {
+    it("ignores still-valid masked results from the previous cache namespace", async () => {
       const { member } = await seed();
-      const grant = await grantAdminCredential(member.id);
-      const actor = (await authenticateAccessKey(grant.key))!;
-      mocks.token = await createSessionToken(actor);
+      mocks.token = (await createTestSession("viewer")).token;
+      const legacyPrefix = prefix.replace(/:v\d+$/, ":v1");
+      const generation = randomUUID();
+      const digest = createHash("sha256").update("[]").digest("hex");
+      const generationKey = `${legacyPrefix}:generation`;
+      const key = `${legacyPrefix}:${generation}:viewer:members:${digest}`;
+      const stored = JSON.stringify({
+        version: 1,
+        expiresAt: Date.now() + 60_000,
+        value: [{ id: member.id, name: "김**원", accounts: [] }],
+      });
+      try {
+        await valkey.set(generationKey, generation, "EX", 60);
+        await valkey.set(key, stored, "EX", 60);
+        const read = await getMembersReadModel();
+        expect(read.members[0].name).toBe(member.name);
+        expect(read.members[0]).not.toHaveProperty("birthYear");
+        expect(await getMembersReadModel()).toEqual(read);
+        expect(await valkey.get(key)).toBe(stored);
+      } finally {
+        await valkey.del(generationKey, key);
+      }
+    });
+
+    it("denies a revoked administrator before looking up warmed query data", async () => {
+      await seed();
+      const actor = await createTestSession("admin");
+      mocks.token = actor.token;
       await getMembersReadModel();
       await autocompleteStoredNicknames("우리");
-      mocks.token = await createSessionToken("owner");
-      await revokeAdminCredential(member.id);
-      mocks.token = await createSessionToken(actor);
+      mocks.token = (await createTestSession("owner")).token;
+      await revokeAdministrator(actor.accountId);
+      mocks.token = actor.token;
       const get = vi.spyOn(valkey, "get");
       await expect(getMembersReadModel()).rejects.toThrow("redirect:/login");
       await expect(autocompleteStoredNicknames("우리")).rejects.toThrow();
@@ -437,9 +702,9 @@ describe.skipIf(!testUrl)(
       }
       expect(await searchStoredNicknames("%없는계정")).toEqual([]);
       expect(await searchStoredNicknames("_없는계정")).toEqual([]);
-      mocks.token = await createSessionToken("viewer");
+      mocks.token = (await createTestSession("viewer")).token;
       expect((await searchStoredNicknames("player#kr1"))[0].memberName).toBe(
-        "김**원",
+        "김모임원",
       );
       expect((await searchStoredNicknames("player#kr1"))[0]).not.toHaveProperty(
         "birthYear",
@@ -502,7 +767,7 @@ describe.skipIf(!testUrl)(
 
     it("uses the native lexicographic index for repeated normalized prefixes and stores no member data", async () => {
       const fixture = await seed("우리 Player");
-      mocks.token = await createSessionToken("viewer");
+      mocks.token = (await createTestSession("viewer")).token;
       expect(await autocompleteStoredNicknames("  우리 P ")).toEqual([
         { id: fixture.account.id, gameName: "우리 Player", tagLine: "KR1" },
       ]);
@@ -513,7 +778,8 @@ describe.skipIf(!testUrl)(
       expect(await autocompleteStoredNicknames("우리 player#")).toHaveLength(1);
       expect(await autocompleteStoredNicknames("우리 player#jp")).toEqual([]);
       expect(await autocompleteStoredNicknames("player")).toEqual([]);
-      expect(select).not.toHaveBeenCalled();
+      expect(businessSelectCount(select.mock.calls)).toBe(0);
+      expect(select).toHaveBeenCalledTimes(4); // Every cached read still checks DB authority.
       const indexKeys = (await keys()).filter((key) =>
         key.includes(":autocomplete:"),
       );
@@ -622,7 +888,15 @@ describe.skipIf(!testUrl)(
       const rows = await db.select().from(riotAccounts);
       const imported = rows.find((row) => row.id !== fixture.account.id)!;
       expect(await autocompleteStoredNicknames(imported.gameName)).toEqual([]);
+      await autocompleteSearch("김모임원");
       await linkAccount(imported.id, fixture.member.id);
+      const memberSuggestion = (await autocompleteSearch("김모임원"))[0];
+      expect(memberSuggestion.kind).toBe("member");
+      if (memberSuggestion.kind === "member")
+        expect(memberSuggestion.accounts).toContainEqual({
+          gameName: imported.gameName,
+          tagLine: imported.tagLine,
+        });
       expect(
         (
           await autocompleteStoredNicknames(
@@ -649,12 +923,13 @@ describe.skipIf(!testUrl)(
       await new Promise((resolve) => setTimeout(resolve, 10));
       const select = vi.spyOn(db, "select");
       await autocompleteStoredNicknames("re");
-      expect(select).toHaveBeenCalledTimes(1);
+      expect(businessSelectCount(select.mock.calls)).toBe(1);
       await unlinkAccount(fixture.account.id);
       await autocompleteStoredNicknames("re");
       select.mockClear();
       expect(await autocompleteStoredNicknames("anything")).toEqual([]);
-      expect(select).not.toHaveBeenCalled();
+      expect(businessSelectCount(select.mock.calls)).toBe(0);
+      expect(select).toHaveBeenCalledTimes(1);
     });
 
     it("coalesces concurrent index builds without exposing a partial snapshot", async () => {
@@ -795,7 +1070,7 @@ describe.skipIf(!testUrl)(
     it("resolves exact normalized Riot IDs, offers safe ambiguous choices, and does not redirect partial names", async () => {
       const first = await seed("Café", false, "KR1");
       const second = await seed("Café", false, "KR2");
-      mocks.token = await createSessionToken("viewer");
+      mocks.token = (await createTestSession("viewer")).token;
       expect(await resolveNicknameMember("  CAFE\u0301 # kr1 ")).toEqual({
         kind: "member",
         memberId: first.member.id,
@@ -806,11 +1081,11 @@ describe.skipIf(!testUrl)(
       });
       const result = await resolveNicknameMember("café");
       expect(result.kind).toBe("ambiguous");
-      expect(JSON.stringify(result)).not.toContain("김모임원");
+      expect(JSON.stringify(result)).toContain("김모임원");
       expect(JSON.stringify(result)).not.toContain("birthYear");
       if (result.kind === "ambiguous")
         expect(
-          result.accounts.every((account) => account.memberName === "김**원"),
+          result.members.every((member) => member.name === "김모임원"),
         ).toBe(true);
       for (const input of [
         "caf",
