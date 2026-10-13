@@ -4,7 +4,7 @@ import {
   autocompleteStoredNicknames,
 } from "@/lib/nickname-search";
 import { UnauthorizedError } from "@/lib/auth-errors";
-import { assertSession } from "@/lib/session";
+import { assertSession, withReadSession } from "@/lib/session";
 import {
   parseSearchInput,
   projectSearchSuggestion,
@@ -14,7 +14,11 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
 
-export async function GET(request: Request) {
+export function GET(request: Request) {
+  return withReadSession(() => autocompleteResponse(request));
+}
+
+async function autocompleteResponse(request: Request) {
   try {
     await assertSession();
     const params = new URL(request.url).searchParams;

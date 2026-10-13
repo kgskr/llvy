@@ -25,6 +25,7 @@ import {
 } from "@/test/database";
 import { replayBytes } from "@/test/replay";
 import { ownerActor } from "@/test/actor";
+import { createRedisProxy } from "@/test/redis-proxy";
 
 const mocks = vi.hoisted(() => ({ token: undefined as string | undefined }));
 function businessSelectCount(calls: unknown[][]) {
@@ -153,6 +154,36 @@ describe.skipIf(!testUrl)(
     async function dataKeys() {
       return (await keys()).filter((key) => !key.endsWith(":generation"));
     }
+
+    it.each(["readiness", "command"])(
+      "falls back promptly when real Redis %s replies stop",
+      async (phase) => {
+        const proxy = await createRedisProxy(testUrl!);
+        vi.spyOn(console, "warn").mockImplementation(() => {});
+        try {
+          disconnectRedis();
+          vi.stubEnv("REDIS_URL", proxy.url);
+          if (phase === "command") {
+            const ready = await getRedisConnection();
+            expect(ready).not.toBeNull();
+            expect(await ready!.client.ping()).toBe("PONG");
+          }
+          proxy.stall();
+          const load = vi.fn().mockResolvedValue("database result");
+          const started = performance.now();
+          expect(
+            await cachedQuery({ query: "stalled", role: "viewer" }, load),
+          ).toBe("database result");
+          // Leaves scheduling headroom while rejecting the old 1-second stall.
+          expect(performance.now() - started).toBeLessThan(750);
+          expect(load).toHaveBeenCalledOnce();
+          expect(await getRedisConnection()).toBeNull();
+        } finally {
+          disconnectRedis();
+          await proxy.close();
+        }
+      },
+    );
     async function seed(
       gameName = "우리 Player",
       excluded = false,

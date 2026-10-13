@@ -56,8 +56,8 @@ describe("Upstash REDIS_URL connection", () => {
     expect(options).toMatchObject({
       tls: { servername: "redis.example" },
       lazyConnect: true,
-      connectTimeout: 1000,
-      commandTimeout: 1000,
+      connectTimeout: 100,
+      commandTimeout: 100,
       maxRetriesPerRequest: 0,
       enableOfflineQueue: false,
       autoResendUnfulfilledCommands: false,
@@ -158,7 +158,7 @@ describe("Upstash REDIS_URL connection", () => {
     vi.useFakeTimers();
     mocks.connect.mockImplementationOnce(() => new Promise(() => {}));
     const connecting = getRedisConnection();
-    await vi.advanceTimersByTimeAsync(1001);
+    await vi.advanceTimersByTimeAsync(101);
     expect(await connecting).toBeNull();
     expect(mocks.disconnect).toHaveBeenCalledTimes(1);
   });

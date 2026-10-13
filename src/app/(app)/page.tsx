@@ -1,9 +1,9 @@
 import { redirect } from "next/navigation";
-import { getSession } from "@/lib/session";
+import { getReadSession } from "@/lib/session";
 import { NicknameSearchForm } from "./nickname-search-form";
 
 export default async function HomePage() {
-  const session = await getSession();
+  const session = await getReadSession();
   if (!session) redirect("/login");
 
   return (

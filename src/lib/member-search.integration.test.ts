@@ -41,6 +41,7 @@ import {
 import { getMemberHistoryReadModel } from "./read-model";
 import { createMember, deleteMember, updateMember } from "./member-mutations";
 import { UnauthorizedError } from "./auth-errors";
+import { GET } from "@/app/api/search/autocomplete/route";
 
 beforeAll(migrateTestDatabase, 30_000);
 beforeEach(async () => {
@@ -90,6 +91,31 @@ async function account(
 }
 const resolve = (input: string, page = 1) =>
   resolveSearchMember({ mode: "unified", input }, page);
+
+it.each(["q=test", "nickname=test", "q=", "q=a&q=b"])(
+  "authenticates one time per real handler/DAL request: %s",
+  async (query) => {
+    const viewer = await createTestSession("viewer");
+    mocks.token = viewer.token;
+    const select = vi.spyOn(db, "select");
+    const authReads = () =>
+      select.mock.calls.filter(
+        ([fields]) =>
+          fields && "account" in fields && fields.account === authAccounts,
+      ).length;
+    const request = () =>
+      new Request(`http://localhost/api/search/autocomplete?${query}`);
+    expect((await GET(request())).status).toBe(query === "q=a&q=b" ? 400 : 200);
+    expect(authReads()).toBe(1);
+    await db
+      .update(authSessions)
+      .set({ revokedAt: new Date() })
+      .where(eq(authSessions.id, viewer.sessionId));
+    select.mockClear();
+    expect((await GET(request())).status).toBe(401);
+    expect(authReads()).toBe(1);
+  },
+);
 
 describe("unified member search against the test database", () => {
   it.each(["viewer", "admin", "owner"] as const)(

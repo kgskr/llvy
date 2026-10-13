@@ -22,7 +22,7 @@ import { getAuthorityConfig } from "@/lib/auth";
 import { applyMembership, maintenanceActor } from "@/lib/auth-store";
 import { lookupGuildMember } from "@/lib/discord";
 import { DiscordBusyError } from "@/lib/discord-circuit";
-import { assertOwner } from "@/lib/session";
+import { assertReadOwner } from "@/lib/session";
 
 export async function cleanupExpiredAuthentication() {
   const now = new Date();
@@ -191,7 +191,7 @@ export async function reconcileGuildAccounts() {
   return finished ?? { status: "lease_lost" as const };
 }
 export async function getAuthenticationMaintenanceStatus() {
-  await assertOwner();
+  await assertReadOwner();
   const [run] = await db
     .select({
       status: authReconciliationRuns.status,

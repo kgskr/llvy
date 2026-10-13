@@ -9,7 +9,10 @@ vi.mock("@/lib/nickname-search", () => ({
   autocompleteStoredNicknames: mocks.autocomplete,
   autocompleteSearch: mocks.unified,
 }));
-vi.mock("@/lib/session", () => ({ assertSession: mocks.auth }));
+vi.mock("@/lib/session", () => ({
+  assertSession: mocks.auth,
+  withReadSession: <T>(read: () => T) => read(),
+}));
 import { UnauthorizedError } from "@/lib/auth-errors";
 import { GET } from "./route";
 

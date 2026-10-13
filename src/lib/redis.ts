@@ -3,7 +3,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import Redis from "ioredis";
 
-const TIMEOUT_MS = 1_000;
+// Cache is optional: a slow provider must not add a one-second request stall.
+const TIMEOUT_MS = 100;
 const RETRY_DELAY_MS = 5_000;
 let connection: {
   url: string;
