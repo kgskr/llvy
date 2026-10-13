@@ -96,7 +96,7 @@ export function projectSearchSuggestion(
 }
 
 const encoder = new TextEncoder();
-/** Matches Valkey's UTF-8 BYLEX ordering, including astral characters. */
+/** Matches Redis's UTF-8 BYLEX ordering, including astral characters. */
 export function compareSearchText(a: string, b: string): number {
   const left = encoder.encode(a),
     right = encoder.encode(b);

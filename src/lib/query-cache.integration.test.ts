@@ -84,7 +84,7 @@ import {
   getMemberHistoryReadModel,
   getMembersReadModel,
 } from "./read-model";
-import { disconnectValkey, getValkeyConnection } from "./valkey";
+import { disconnectRedis, getRedisConnection } from "./redis";
 import type Redis from "ioredis";
 import { createAutocompleteIndex } from "./autocomplete-index";
 import {
@@ -93,12 +93,12 @@ import {
   type MemberSuggestion,
 } from "./search-contract";
 
-// Explicit opt-in: never derive this endpoint from the production VALKEY_URL.
-const testUrl = process.env.LLVY_VALKEY_TEST_URL;
+// Explicit opt-in: never derive this endpoint from the production REDIS_URL.
+const testUrl = process.env.LLVY_REDIS_TEST_URL;
 describe.skipIf(!testUrl)(
-  "Podman Valkey 9 query cache and nickname foundation",
+  "Podman Redis 7 query cache and nickname foundation",
   () => {
-    let valkey: Redis;
+    let redis: Redis;
     let prefix: string;
     let versionChecked = false;
 
@@ -106,27 +106,27 @@ describe.skipIf(!testUrl)(
       const url = new URL(testUrl!);
       if (url.protocol !== "redis:" || url.hostname !== "127.0.0.1")
         throw new Error(
-          "LLVY_VALKEY_TEST_URL must target a disposable local container.",
+          "LLVY_REDIS_TEST_URL must target a disposable local container.",
         );
       await migrateTestDatabase();
     }, 30_000);
     beforeEach(async () => {
-      disconnectValkey();
+      disconnectRedis();
       await resetTestDatabase();
-      vi.stubEnv("VALKEY_URL", testUrl!);
-      vi.stubEnv("VALKEY_KEY_PREFIX", `llvy-test:${randomUUID()}`);
+      vi.stubEnv("REDIS_URL", testUrl!);
+      vi.stubEnv("REDIS_KEY_PREFIX", `llvy-test:${randomUUID()}`);
       vi.stubEnv(
         "POSTGRES_URL",
         "postgres://fixture:fixture@fixture.invalid/disposable",
       );
       vi.stubEnv("AUTH_SECRET", "independent-cache-signing-secret-32-bytes");
       mocks.token = (await createTestSession("owner")).token;
-      const connection = await getValkeyConnection();
+      const connection = await getRedisConnection();
       expect(connection).not.toBeNull();
-      valkey = connection!.client;
+      redis = connection!.client;
       prefix = connection!.prefix;
       if (!versionChecked) {
-        expect(await valkey.info("server")).toMatch(/^valkey_version:9\./m);
+        expect(await redis.info("server")).toMatch(/^redis_version:7\./m);
         versionChecked = true;
       }
     });
@@ -134,21 +134,21 @@ describe.skipIf(!testUrl)(
       vi.restoreAllMocks();
       // A disconnected ioredis socket can still briefly report status=ready.
       // Reconnect explicitly rather than relying on that transitional status.
-      disconnectValkey();
-      vi.stubEnv("VALKEY_URL", testUrl!);
-      valkey = (await getValkeyConnection())!.client;
+      disconnectRedis();
+      vi.stubEnv("REDIS_URL", testUrl!);
+      redis = (await getRedisConnection())!.client;
       // Remove this test's UUID namespace only; never FLUSHDB/FLUSHALL.
-      if (valkey.status === "ready") {
-        const keys = await valkey.keys(`${prefix}:*`);
-        if (keys.length) await valkey.del(...keys);
+      if (redis.status === "ready") {
+        const keys = await redis.keys(`${prefix}:*`);
+        if (keys.length) await redis.del(...keys);
       }
-      disconnectValkey();
+      disconnectRedis();
       vi.unstubAllEnvs();
     });
     afterAll(() => postgres.close());
 
     async function keys() {
-      return valkey.keys(`${prefix}:*`);
+      return redis.keys(`${prefix}:*`);
     }
     async function dataKeys() {
       return (await keys()).filter((key) => !key.endsWith(":generation"));
@@ -202,16 +202,16 @@ describe.skipIf(!testUrl)(
         },
       ];
       expect(await autocompleteSearch("김")).toEqual(expected);
-      const generation = await valkey.get(`${prefix}:generation`);
+      const generation = await redis.get(`${prefix}:generation`);
       const memberKey = `${prefix}:${generation}:member-autocomplete:v1`;
       const accountKey = `${prefix}:${generation}:autocomplete:v1`;
       for (const key of [memberKey, accountKey]) {
         for (const suffix of ["names", "accounts", "ready"])
-          expect(await valkey.ttl(`${key}:${suffix}`)).toBeGreaterThanOrEqual(
+          expect(await redis.ttl(`${key}:${suffix}`)).toBeGreaterThanOrEqual(
             58,
           );
       }
-      const stored = await valkey.hgetall(`${memberKey}:accounts`);
+      const stored = await redis.hgetall(`${memberKey}:accounts`);
       expect(Object.values(stored).map((value) => JSON.parse(value))).toEqual([
         expected[0],
       ]);
@@ -219,7 +219,7 @@ describe.skipIf(!testUrl)(
       expect(await autocompleteSearch("김")).toEqual(expected);
       expect(businessSelectCount(select.mock.calls)).toBe(0);
       const field = Object.keys(stored)[0];
-      await valkey.hset(
+      await redis.hset(
         `${memberKey}:accounts`,
         field,
         JSON.stringify({
@@ -229,17 +229,17 @@ describe.skipIf(!testUrl)(
         }),
       );
       expect(await autocompleteSearch("김")).toEqual(expected);
-      await valkey.hset(`${memberKey}:accounts`, field, "broken JSON");
+      await redis.hset(`${memberKey}:accounts`, field, "broken JSON");
       expect(await autocompleteSearch("김")).toEqual(expected);
-      await valkey.del(`${memberKey}:names`);
+      await redis.del(`${memberKey}:names`);
       expect(await autocompleteSearch("김")).toEqual(expected);
-      await valkey.pexpire(`${memberKey}:ready`, 1);
+      await redis.pexpire(`${memberKey}:ready`, 1);
       await new Promise((resolve) => setTimeout(resolve, 10));
       select.mockClear();
       expect(await autocompleteSearch("김")).toEqual(expected);
       expect(businessSelectCount(select.mock.calls)).toBe(1);
-      disconnectValkey();
-      vi.stubEnv("VALKEY_URL", "");
+      disconnectRedis();
+      vi.stubEnv("REDIS_URL", "");
       expect(await autocompleteSearch("김")).toEqual(expected);
     });
 
@@ -283,14 +283,14 @@ describe.skipIf(!testUrl)(
       expect((await autocompleteSearch("이변경"))[0]).toMatchObject({
         accounts: [],
       });
-      const generation = await valkey.get(`${prefix}:generation`);
+      const generation = await redis.get(`${prefix}:generation`);
       await expect(
         withActorTransaction(ownerActor, async (tx) => {
           await tx.insert(members).values({ name: "롤백모임원" });
           throw new Error("rollback");
         }),
       ).rejects.toThrow("rollback");
-      expect(await valkey.get(`${prefix}:generation`)).toBe(generation);
+      expect(await redis.get(`${prefix}:generation`)).toBe(generation);
       expect(await autocompleteSearch("롤백")).toEqual([]);
       await deleteMember(added);
       expect(await autocompleteSearch("이변경")).toEqual([]);
@@ -367,7 +367,7 @@ describe.skipIf(!testUrl)(
       expect(
         (await keys()).some((key) => key.includes(":member-autocomplete:")),
       ).toBe(false);
-      const generation = await valkey.get(`${prefix}:generation`);
+      const generation = await redis.get(`${prefix}:generation`);
       await invalidateQueryCache();
       finish([
         { kind: "member", id: randomUUID(), name: "김옛이름", accounts: [] },
@@ -376,7 +376,7 @@ describe.skipIf(!testUrl)(
       expect((await second)[0].name).toBe("김옛이름");
       expect(load).toHaveBeenCalledOnce();
       expect(
-        await valkey.exists(
+        await redis.exists(
           `${prefix}:${generation}:member-autocomplete:v1:ready`,
         ),
       ).toBe(1);
@@ -390,11 +390,11 @@ describe.skipIf(!testUrl)(
       expect(current).toHaveBeenCalledOnce();
     });
 
-    it("returns the same mixed candidates after a Valkey command failure", async () => {
+    it("returns the same mixed candidates after a Redis command failure", async () => {
       await seed("김계정");
       const expected = await autocompleteSearch("김");
       vi.spyOn(console, "warn").mockImplementation(() => {});
-      vi.spyOn(valkey, "eval").mockRejectedValueOnce(
+      vi.spyOn(redis, "eval").mockRejectedValueOnce(
         new Error("fixture cache failure"),
       );
       expect(await autocompleteSearch("김")).toEqual(expected);
@@ -407,9 +407,9 @@ describe.skipIf(!testUrl)(
       expect(await cachedQuery(identity, load)).toBeNull();
       expect(load).toHaveBeenCalledTimes(1);
       const [key] = await dataKeys();
-      expect(await valkey.ttl(key)).toBeGreaterThanOrEqual(58);
-      expect(await valkey.ttl(key)).toBeLessThanOrEqual(60);
-      await valkey.pexpire(key, 1);
+      expect(await redis.ttl(key)).toBeGreaterThanOrEqual(58);
+      expect(await redis.ttl(key)).toBeLessThanOrEqual(60);
+      await redis.pexpire(key, 1);
       await new Promise((resolve) => setTimeout(resolve, 10));
       await cachedQuery(identity, load);
       expect(load).toHaveBeenCalledTimes(2);
@@ -424,10 +424,10 @@ describe.skipIf(!testUrl)(
       const key = (await dataKeys()).find((key) =>
         key.includes(":owner:test:"),
       )!;
-      await valkey.set(key, "invalid JSON");
+      await redis.set(key, "invalid JSON");
       await cachedQuery({ query: "test", role: "owner", args: [1] }, load);
       expect(load).toHaveBeenCalledTimes(4);
-      expect(JSON.parse((await valkey.get(key))!).version).toBe(1);
+      expect(JSON.parse((await redis.get(key))!).version).toBe(1);
     });
 
     it("never caches DB errors or repeats a failing loader", async () => {
@@ -439,7 +439,7 @@ describe.skipIf(!testUrl)(
       expect(await dataKeys()).toEqual([]);
     });
 
-    it("bypasses large payloads instead of filling Valkey", async () => {
+    it("bypasses large payloads instead of filling Redis", async () => {
       const load = vi.fn().mockResolvedValue("x".repeat(256 * 1024));
       const identity = { query: "large", role: "viewer" as const };
       await cachedQuery(identity, load);
@@ -450,9 +450,7 @@ describe.skipIf(!testUrl)(
 
     it("returns a DB result once when a cache read fails", async () => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      vi.spyOn(valkey, "get").mockRejectedValueOnce(
-        new Error("fixture-secret"),
-      );
+      vi.spyOn(redis, "get").mockRejectedValueOnce(new Error("fixture-secret"));
       const load = vi.fn().mockResolvedValue("fresh DB result");
       expect(
         await cachedQuery({ query: "failure", role: "viewer" }, load),
@@ -465,7 +463,7 @@ describe.skipIf(!testUrl)(
       const { game } = await seed();
       await getGameDetailReadModel(game.id);
       vi.spyOn(console, "warn").mockImplementation(() => {});
-      vi.spyOn(valkey, "set").mockRejectedValueOnce(
+      vi.spyOn(redis, "set").mockRejectedValueOnce(
         new Error("invalidation unavailable"),
       );
       await expect(setGameComment(game.id, "DB 커밋 유지")).resolves.toBe(true);
@@ -497,10 +495,10 @@ describe.skipIf(!testUrl)(
     it("regenerates an evicted generation without resurrecting old entries", async () => {
       const identity = { query: "eviction", role: "viewer" as const };
       await cachedQuery(identity, async () => "old");
-      const previous = await valkey.get(`${prefix}:generation`);
-      await valkey.del(`${prefix}:generation`);
+      const previous = await redis.get(`${prefix}:generation`);
+      await redis.del(`${prefix}:generation`);
       expect(await cachedQuery(identity, async () => "new")).toBe("new");
-      expect(await valkey.get(`${prefix}:generation`)).not.toBe(previous);
+      expect(await redis.get(`${prefix}:generation`)).not.toBe(previous);
     });
 
     it("projects viewer data before caching while retaining live session checks", async () => {
@@ -519,13 +517,13 @@ describe.skipIf(!testUrl)(
       for (const key of (await dataKeys()).filter((key) =>
         key.includes(":viewer:"),
       )) {
-        const stored = (await valkey.get(key))!;
+        const stored = (await redis.get(key))!;
         expect(stored).toContain(member.name);
         expect(stored).not.toContain("김**원");
         expect(stored).not.toContain("birthYear");
       }
       mocks.token = undefined;
-      const get = vi.spyOn(valkey, "get");
+      const get = vi.spyOn(redis, "get");
       await expect(getMembersReadModel()).rejects.toThrow("redirect:/login");
       expect(get).not.toHaveBeenCalled();
     });
@@ -544,15 +542,15 @@ describe.skipIf(!testUrl)(
         value: [{ id: member.id, name: "김**원", accounts: [] }],
       });
       try {
-        await valkey.set(generationKey, generation, "EX", 60);
-        await valkey.set(key, stored, "EX", 60);
+        await redis.set(generationKey, generation, "EX", 60);
+        await redis.set(key, stored, "EX", 60);
         const read = await getMembersReadModel();
         expect(read.members[0].name).toBe(member.name);
         expect(read.members[0]).not.toHaveProperty("birthYear");
         expect(await getMembersReadModel()).toEqual(read);
-        expect(await valkey.get(key)).toBe(stored);
+        expect(await redis.get(key)).toBe(stored);
       } finally {
-        await valkey.del(generationKey, key);
+        await redis.del(generationKey, key);
       }
     });
 
@@ -565,7 +563,7 @@ describe.skipIf(!testUrl)(
       mocks.token = (await createTestSession("owner")).token;
       await revokeAdministrator(actor.accountId);
       mocks.token = actor.token;
-      const get = vi.spyOn(valkey, "get");
+      const get = vi.spyOn(redis, "get");
       await expect(getMembersReadModel()).rejects.toThrow("redirect:/login");
       await expect(autocompleteStoredNicknames("우리")).rejects.toThrow();
       await expect(resolveNicknameMember("우리 Player#KR1")).rejects.toThrow();
@@ -649,9 +647,9 @@ describe.skipIf(!testUrl)(
         .returning();
       await linkAccount(imported.id, member.id);
       expect(await searchStoredNicknames(imported.gameName)).toHaveLength(1);
-      const generation = await valkey.get(`${prefix}:generation`);
+      const generation = await redis.get(`${prefix}:generation`);
       expect((await ingestReplay(input)).duplicate).toBe(true);
-      expect(await valkey.get(`${prefix}:generation`)).toBe(generation);
+      expect(await redis.get(`${prefix}:generation`)).toBe(generation);
     });
 
     it("does not invalidate a rolled-back transaction", async () => {
@@ -659,14 +657,14 @@ describe.skipIf(!testUrl)(
         { query: "rollback", role: "owner" },
         async () => "stable",
       );
-      const generation = await valkey.get(`${prefix}:generation`);
+      const generation = await redis.get(`${prefix}:generation`);
       await expect(
         withActorTransaction(ownerActor, async (tx) => {
           await tx.insert(members).values({ name: "rollback" });
           throw new Error("rollback fixture");
         }),
       ).rejects.toThrow("rollback fixture");
-      expect(await valkey.get(`${prefix}:generation`)).toBe(generation);
+      expect(await redis.get(`${prefix}:generation`)).toBe(generation);
       expect(await db.select().from(members)).toEqual([]);
     });
 
@@ -749,12 +747,12 @@ describe.skipIf(!testUrl)(
 
     it("returns DB results when no URL is configured and after an actual connection refusal", async () => {
       const fixture = await seed();
-      disconnectValkey();
-      vi.stubEnv("VALKEY_URL", "");
+      disconnectRedis();
+      vi.stubEnv("REDIS_URL", "");
       expect((await getMembersReadModel()).members[0].id).toBe(
         fixture.member.id,
       );
-      vi.stubEnv("VALKEY_URL", "redis://127.0.0.1:1");
+      vi.stubEnv("REDIS_URL", "redis://127.0.0.1:1");
       vi.spyOn(console, "warn").mockImplementation(() => {});
       const started = performance.now();
       expect((await getMembersReadModel()).members[0].id).toBe(
@@ -785,16 +783,16 @@ describe.skipIf(!testUrl)(
       );
       expect(indexKeys).toHaveLength(3);
       for (const key of indexKeys) {
-        expect(await valkey.ttl(key)).toBeGreaterThanOrEqual(58);
-        expect(await valkey.ttl(key)).toBeLessThanOrEqual(60);
+        expect(await redis.ttl(key)).toBeGreaterThanOrEqual(58);
+        expect(await redis.ttl(key)).toBeLessThanOrEqual(60);
         if (key.endsWith(":accounts")) {
-          const payload = JSON.stringify(await valkey.hgetall(key));
+          const payload = JSON.stringify(await redis.hgetall(key));
           expect(payload).not.toContain("김모임원");
           expect(payload).not.toContain("birthYear");
           expect(payload).not.toContain("memberId");
         }
         if (key.endsWith(":names")) {
-          expect(await valkey.zrange(key, "0", "-1", "WITHSCORES")).toEqual([
+          expect(await redis.zrange(key, "0", "-1", "WITHSCORES")).toEqual([
             `우리 player#kr1\u0000${fixture.account.id}`,
             "0",
           ]);
@@ -912,14 +910,14 @@ describe.skipIf(!testUrl)(
       const marker = (await keys()).find((key) => key.endsWith(":ready"))!;
       const hash = marker.replace(/:ready$/, ":accounts");
       const name = `rebuild#kr1\u0000${fixture.account.id}`;
-      await valkey.hset(hash, name, "invalid JSON");
+      await redis.hset(hash, name, "invalid JSON");
       expect(await autocompleteStoredNicknames("re")).toHaveLength(1);
-      expect(JSON.parse((await valkey.hget(hash, name))!).gameName).toBe(
+      expect(JSON.parse((await redis.hget(hash, name))!).gameName).toBe(
         "rebuild",
       );
-      await valkey.del(hash);
+      await redis.del(hash);
       expect(await autocompleteStoredNicknames("re")).toHaveLength(1);
-      await valkey.pexpire(marker, 1);
+      await redis.pexpire(marker, 1);
       await new Promise((resolve) => setTimeout(resolve, 10));
       const select = vi.spyOn(db, "select");
       await autocompleteStoredNicknames("re");
@@ -984,7 +982,7 @@ describe.skipIf(!testUrl)(
         return waiting;
       });
       await began;
-      const previous = await valkey.get(`${prefix}:generation`);
+      const previous = await redis.get(`${prefix}:generation`);
       await invalidateQueryCache();
       finish([{ id: randomUUID(), gameName: "Ancient", tagLine: "KR1" }]);
       expect((await first)[0].gameName).toBe("Ancient");
@@ -1000,41 +998,41 @@ describe.skipIf(!testUrl)(
         "Actual",
       );
       expect(load).toHaveBeenCalledTimes(1);
-      expect(await valkey.get(`${prefix}:generation`)).not.toBe(previous);
+      expect(await redis.get(`${prefix}:generation`)).not.toBe(previous);
     });
 
     it("does not publish a half-built snapshot when a temporary key disappears", async () => {
       const fixture = { id: randomUUID(), gameName: "Atomic", tagLine: "KR1" };
-      const original = valkey.eval.bind(valkey);
+      const original = redis.eval.bind(redis);
       vi.spyOn(console, "warn").mockImplementation(() => {});
-      vi.spyOn(valkey, "eval").mockImplementation(async (...args) => {
-        if (args[1] === 5) await valkey.del(String(args[2]));
+      vi.spyOn(redis, "eval").mockImplementation(async (...args) => {
+        if (args[1] === 5) await redis.del(String(args[2]));
         return original(...args);
       });
       const load = vi.fn().mockResolvedValue([fixture]);
       expect(await queryNicknameAutocomplete("a", load)).toEqual([fixture]);
       expect(load).toHaveBeenCalledTimes(1);
       vi.restoreAllMocks();
-      disconnectValkey();
-      valkey = (await getValkeyConnection())!.client;
+      disconnectRedis();
+      redis = (await getRedisConnection())!.client;
       const indexKeys = (await keys()).filter((key) =>
         key.includes(":autocomplete:"),
       );
       expect(indexKeys.some((key) => key.endsWith(":ready"))).toBe(false);
       for (const key of indexKeys)
-        expect(await valkey.ttl(key)).toBeGreaterThan(0);
+        expect(await redis.ttl(key)).toBeGreaterThan(0);
       expect(await queryNicknameAutocomplete("a", load)).toEqual([fixture]);
       expect(load).toHaveBeenCalledTimes(2);
     });
 
     it("propagates a failing DB build once even with an invalid generation", async () => {
-      await valkey.set(`${prefix}:generation`, "damaged");
+      await redis.set(`${prefix}:generation`, "damaged");
       const load = vi.fn().mockRejectedValue(new Error("DB snapshot failed"));
       await expect(queryNicknameAutocomplete("a", load)).rejects.toThrow(
         "DB snapshot failed",
       );
       expect(load).toHaveBeenCalledTimes(1);
-      await valkey.del(`${prefix}:generation`);
+      await redis.del(`${prefix}:generation`);
       load.mockClear();
       await expect(queryNicknameAutocomplete("a", load)).rejects.toThrow(
         "DB snapshot failed",
@@ -1045,7 +1043,7 @@ describe.skipIf(!testUrl)(
     it("returns the DB snapshot on an actual command failure and propagates DB errors only once", async () => {
       const fixture = await seed("fallback");
       vi.spyOn(console, "warn").mockImplementation(() => {});
-      vi.spyOn(valkey, "eval").mockRejectedValueOnce(
+      vi.spyOn(redis, "eval").mockRejectedValueOnce(
         new Error("fixture-secret"),
       );
       expect((await autocompleteStoredNicknames("fall"))[0].id).toBe(
@@ -1056,8 +1054,8 @@ describe.skipIf(!testUrl)(
         "DB unavailable",
       );
       expect(load).toHaveBeenCalledTimes(1);
-      disconnectValkey();
-      vi.stubEnv("VALKEY_URL", "");
+      disconnectRedis();
+      vi.stubEnv("REDIS_URL", "");
       expect((await autocompleteStoredNicknames("fall"))[0].id).toBe(
         fixture.account.id,
       );
@@ -1108,7 +1106,7 @@ describe.skipIf(!testUrl)(
         memberId: first.member.id,
       });
       await autocompleteStoredNicknames("same");
-      // Simulate a DB change whose Valkey invalidation was lost.
+      // Simulate a DB change whose Redis invalidation was lost.
       const { eq } = await import("drizzle-orm");
       await db
         .update(riotAccounts)

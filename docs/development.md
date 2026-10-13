@@ -15,7 +15,7 @@ Node.js 24.x에서 `npm ci`로 잠금 파일의 의존성을 설치합니다.
 | `npm run test:watch`         | 변경 시 테스트 재실행                                 |
 | `npm run test:integration`   | 기본 저장·업로드 바인딩·경기 관리 DB 통합 테스트 묶음 |
 | `npm run test:replay`        | 지정한 실제 리플레이의 통합 테스트                    |
-| `npm run test:valkey`        | 로컬 Podman Valkey 9의 캐시·자동완성 통합 테스트      |
+| `npm run test:redis`         | 로컬 Podman Redis 7의 캐시·자동완성 통합 테스트       |
 | `npm run test:auth-postgres` | 격리 PostgreSQL의 실제 연결 간 인증 잠금 경합 테스트  |
 | `npm run format:write`       | Prettier 포맷 적용                                    |
 
@@ -90,11 +90,11 @@ podman stop llvy-auth-test-pg
 같은 변수를 `npm run check`에도 전달하면 전체 검사에 포함됩니다. 미지정 시 전체 검사에서
 이 파일의 테스트 9개를 건너뛰고, 전용 명령은 설정 누락을 오류로 처리합니다.
 
-## Valkey 컨테이너 테스트
+## Redis 컨테이너 테스트
 
-Valkey의 실제 명령·TTL·무효화·검색·권한 검증은 [Podman 테스트](valkey.md#podman-테스트)를
-사용합니다. 이 테스트는 `LLVY_VALKEY_TEST_URL`이 있을 때 실행하며 운영 `VALKEY_URL`을 사용하지 않습니다.
-기본 회귀 검사는 외부 Valkey 없이도 실행할 수 있습니다.
+Redis의 실제 명령·TTL·무효화·검색·권한 검증은 [Podman 테스트](redis.md#podman-테스트)를
+사용합니다. 이 테스트는 `LLVY_REDIS_TEST_URL`이 있을 때 실행하며 운영 `REDIS_URL`을 사용하지 않습니다.
+기본 회귀 검사는 외부 Redis 없이도 실행할 수 있습니다.
 
 메인 검색은 `/api/search/autocomplete?q=...`의 이름·Riot 후보를 사용합니다. 모든 등록 모임원의
 이름을 접두어로 추천하며 Riot 계정은 연결과 활성 경기 조건을 유지합니다. `member`/`riot-account`
@@ -117,13 +117,13 @@ Valkey의 실제 명령·TTL·무효화·검색·권한 검증은 [Podman 테스
 `searchNormalizationData()`에 전달합니다. 데이터 출처는 JSON에, 라이선스는
 [`scripts/UNICODE-LICENSE.txt`](../scripts/UNICODE-LICENSE.txt)에 있습니다.
 
-실제 Valkey 회귀는 두 인덱스의 키 분리·cold/warm 조회·TTL·부분 eviction·원자 게시·동시 재구축·
+실제 Redis 회귀는 두 인덱스의 키 분리·cold/warm 조회·TTL·부분 eviction·원자 게시·동시 재구축·
 커밋 후 세대 교체·롤백·DB 대체 조회를 확인합니다. API는 매 요청 인증하며 `private, no-store`,
 401/400/503을 구분합니다. 브라우저에서는 한글 IME, 방향키/Enter/Escape·포인터 선택, 오류 안내와
 JavaScript 없는 GET 제출을 확인합니다. 초성·유사어 검색은 범위 밖입니다.
 
-실제 Layerbase TLS와 Vercel의 여러 인스턴스·연결 수·휴면 복귀·브라우저 네트워크는
-[배포 후 확인](valkey.md#배포-후-확인)으로 구분합니다. 읽기 검색은 감사로그에 기록하지 않습니다.
+실제 Upstash TLS와 Vercel의 여러 인스턴스·연결 수·휴면 복귀·브라우저 네트워크는
+[배포 후 확인](redis.md#배포-후-확인)으로 구분합니다. 읽기 검색은 감사로그에 기록하지 않습니다.
 
 ## 실제 리플레이 테스트
 

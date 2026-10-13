@@ -45,7 +45,7 @@ import { UnauthorizedError } from "./auth-errors";
 beforeAll(migrateTestDatabase, 30_000);
 beforeEach(async () => {
   await resetTestDatabase();
-  vi.stubEnv("VALKEY_URL", "");
+  vi.stubEnv("REDIS_URL", "");
   mocks.token = (await createTestSession("owner")).token;
 });
 afterEach(() => {

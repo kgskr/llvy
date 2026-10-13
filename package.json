@@ -17,7 +17,7 @@
     "test": "vitest run",
     "test:integration": "vitest run src/lib/database.integration.test.ts src/lib/pending-upload-store.integration.test.ts src/lib/match-management.integration.test.ts",
     "test:replay": "vitest run src/lib/real-replay.integration.test.ts",
-    "test:valkey": "node scripts/test-valkey.mjs",
+    "test:redis": "node scripts/test-redis.mjs",
     "test:auth-postgres": "node scripts/test-auth-postgres.mjs",
     "typecheck": "tsc --noEmit",
     "check": "npm test && npm run lint && npm run typecheck && npm run build && npm run format",

@@ -6,7 +6,7 @@ import {
   getQueryCacheGeneration,
   QUERY_CACHE_TTL_SECONDS,
 } from "@/lib/query-cache";
-import { getValkeyConnection, valkeyFailed } from "@/lib/valkey";
+import { getRedisConnection, redisFailed } from "@/lib/redis";
 
 import { AUTOCOMPLETE_LIMIT, compareSearchText } from "@/lib/search-contract";
 
@@ -62,7 +62,7 @@ return 1`;
       `${key}:accounts`,
       `${key}:ready`,
       Buffer.concat([Buffer.from("["), bytes]),
-      // Valkey compares raw UTF-8 bytes; 0xff covers emoji as well as BMP text.
+      // Redis compares raw UTF-8 bytes; 0xff covers emoji as well as BMP text.
       Buffer.concat([Buffer.from("["), bytes, Buffer.from([0xff])]),
       AUTOCOMPLETE_LIMIT,
     );
@@ -137,7 +137,7 @@ return 1`;
         if (!safe) throw new Error("Invalid autocomplete source");
         return safe;
       });
-    const connection = await getValkeyConnection();
+    const connection = await getRedisConnection();
     if (!connection) return matches(await loadSafe(), input);
     const { client, prefix } = connection;
     let key: string | null = null;
@@ -149,7 +149,7 @@ return 1`;
         if (stored !== null) return stored;
       }
     } catch {
-      valkeyFailed(client);
+      redisFailed(client);
       return matches(await loadSafe(), input);
     }
     if (!key) return matches(await loadSafe(), input);
@@ -164,7 +164,7 @@ return 1`;
         try {
           await publishIndex(client, indexKey, accounts);
         } catch {
-          valkeyFailed(client);
+          redisFailed(client);
         }
         return accounts;
       })();

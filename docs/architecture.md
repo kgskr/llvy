@@ -92,7 +92,7 @@ Discord 계정·grant에는 게임 멤버 FK가 없어 삭제가 로그인 권�
 
 ## 조회 캐시와 이름·닉네임 검색
 
-조회 모델은 세션 확인 후 [Valkey](valkey.md)에 역할별로 투영한 결과를 60초간 캐시합니다.
+조회 모델은 세션 확인 후 [Redis](redis.md)에 역할별로 투영한 결과를 60초간 캐시합니다.
 데이터 변경 커밋 후 공유 세대 UUID를 교체하며 이전 조회는 캡처한 세대에만 저장합니다.
 인증 계정·세션·grant·감사·요청 제한은 캐시하지 않습니다. 모임원 상세는 통계 캐시와 별개로
 현재 DB의 모임원 존재·이름을 확인하며 일반 사용자에게 생년을 전달하지 않습니다.
@@ -110,7 +110,7 @@ Discord 계정·grant에는 게임 멤버 FK가 없어 삭제가 로그인 권�
 [`autocomplete-index.ts`](../src/lib/autocomplete-index.ts)의 내부 도구를 통해 Riot 인덱스
 `autocomplete:v1`과 이름 인덱스 `member-autocomplete:v1`을 별도로 게시합니다. 이름과 계정 미리보기는
 한 번의 join 조회로 구성합니다. 두 인덱스는 Sorted Set·최소 표시 Hash·완료 표식, 원자 게시,
-60초 TTL·세대 무효화·동시 재구축 병합을 공유합니다. Valkey 장애 시 DB 결과로 대체하고,
+60초 TTL·세대 무효화·동시 재구축 병합을 공유합니다. Redis 장애 시 DB 결과로 대체하고,
 어느 DB 소스든 실패하면 불완전한 성공 목록을 반환하지 않습니다.
 
 자동완성은 NFC·trim·소문자 정규화 후 접두어를 찾습니다. 제출의 `resolveSearchMember()`는 현재 DB에서
@@ -132,7 +132,7 @@ Discord 계정·grant에는 게임 멤버 FK가 없어 삭제가 로그인 권�
 `search-unicode-data.json`, `scripts/search-normalization.mjs`에 있습니다. 이미 배포한 함수는
 덮어쓰지 않고 새 버전과 stored 컬럼 재계산 migration으로 변경합니다.
 TTL은 게시 후 60초로, 재구축 시간을 포함한 변경 시점 기준의 엄격한 상한은 아닙니다.
-자세한 장애 동작과 운영 확인 항목은 [Valkey 안내](valkey.md)를 따릅니다.
+자세한 장애 동작과 운영 확인 항목은 [Redis 안내](redis.md)를 따릅니다.
 
 ## 인증과 요청 제한
 

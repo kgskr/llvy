@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 
-const target = process.env.LLVY_VALKEY_TEST_URL;
+const target = process.env.LLVY_REDIS_TEST_URL;
 let local = false;
 try {
   const url = new URL(target);
@@ -10,7 +10,7 @@ try {
 }
 if (!local) {
   console.error(
-    "Set LLVY_VALKEY_TEST_URL to the disposable Podman container, e.g. redis://127.0.0.1:16379.",
+    "Set LLVY_REDIS_TEST_URL to the disposable Podman container, e.g. redis://127.0.0.1:16379.",
   );
   process.exit(1);
 }
@@ -20,12 +20,12 @@ const result = spawnSync(
   [
     "node_modules/vitest/vitest.mjs",
     "run",
-    "src/lib/valkey.test.ts",
+    "src/lib/redis.test.ts",
     "src/lib/query-cache.integration.test.ts",
   ],
   {
     stdio: "inherit",
-    env: { ...process.env, VALKEY_URL: "" },
+    env: { ...process.env, REDIS_URL: "" },
   },
 );
 process.exit(result.status ?? 1);
