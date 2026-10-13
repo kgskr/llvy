@@ -12,5 +12,5 @@
 
 ## 3. Production rollout
 
-- [ ] 3.1 Publish the verified commit and deploy it to Production in sin1.
-- [ ] 3.2 Verify domain/commit/region, authenticated cold/warm reads, Redis cache activity and runtime warnings; record the production verification boundaries.
+- [x] 3.1 Publish the verified commit and deploy it to Production in sin1.
+- [x] 3.2 Verify domain/commit/region, authenticated cold/warm reads, Redis cache activity and runtime warnings; record the production verification boundaries.
