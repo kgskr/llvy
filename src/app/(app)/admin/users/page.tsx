@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { listLoginAccounts } from "@/lib/account-administration";
 import { getAuthenticationMaintenanceStatus } from "@/lib/auth-maintenance";
-import { getSession } from "@/lib/session";
+import { getReadSession } from "@/lib/session";
 import { formatDate } from "@/lib/format";
 import { PermissionControls } from "./permission-controls";
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export default async function UsersPage({
 }: {
   searchParams: Promise<{ q?: string; page?: string }>;
 }) {
-  const session = await getSession();
+  const session = await getReadSession();
   if (!session) redirect("/login?redirectTo=%2Fadmin%2Fusers");
   if (session.role !== "owner") redirect("/");
   const params = await searchParams;

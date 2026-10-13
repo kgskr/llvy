@@ -1,5 +1,7 @@
 import "server-only";
 
+import { AsyncLocalStorage } from "node:async_hooks";
+import { cache } from "react";
 import { cookies } from "next/headers";
 
 import { SESSION_COOKIE, readSessionToken } from "@/lib/auth";
@@ -16,6 +18,22 @@ export async function getSession() {
   const actor = await findSessionActor(hashReference(session.reference));
   return actor ? { ...actor, issuedAt: session.issuedAt, token: token! } : null;
 }
+
+const readScope = new AsyncLocalStorage<{
+  session?: ReturnType<typeof getSession>;
+}>();
+
+/** Opt-in scope for one read handler; React cache alone does not cover routes. */
+export function withReadSession<T>(read: () => T): T {
+  return readScope.run({}, read);
+}
+
+/** One DB snapshot per render/read request, never shared across requests. */
+export const getReadSession = cache(() => {
+  const scope = readScope.getStore();
+  if (!scope) return getSession();
+  return (scope.session ??= getSession());
+});
 
 /** Read and verify the session cookie. Use in route handlers / server actions. */
 export async function hasValidSession(): Promise<boolean> {
@@ -44,7 +62,14 @@ export async function assertOwner() {
 
 /** Throw UnauthorizedError when there is no valid session. */
 export async function assertSession() {
-  const session = await getSession();
+  const session = await getReadSession();
   if (!session) throw new UnauthorizedError();
+  return session;
+}
+
+/** Owner-only reads share the render snapshot; mutations use assertOwner. */
+export async function assertReadOwner() {
+  const session = await assertSession();
+  if (session.role !== "owner") throw new ForbiddenError();
   return session;
 }

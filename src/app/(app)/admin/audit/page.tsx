@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 
 import { listAuditLogs } from "@/lib/audit";
 import { formatDate } from "@/lib/format";
-import { getSession } from "@/lib/session";
+import { getReadSession } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -97,7 +97,7 @@ export default async function AuditPage({
 }: {
   searchParams: Promise<{ page?: string | string[] }>;
 }) {
-  const session = await getSession();
+  const session = await getReadSession();
   if (!session) redirect("/login?redirectTo=%2Fadmin%2Faudit");
   if (session.role !== "owner")
     redirect(session.role === "admin" ? "/admin" : "/members");

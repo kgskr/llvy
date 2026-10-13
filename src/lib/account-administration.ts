@@ -17,7 +17,7 @@ import { accountRole } from "@/lib/authority";
 import { getAuthorityConfig } from "@/lib/auth";
 import { applyMembership, saveMembership } from "@/lib/auth-store";
 import { lookupGuildMember } from "@/lib/discord";
-import { assertOwner } from "@/lib/session";
+import { assertOwner, assertReadOwner } from "@/lib/session";
 import { isUuid } from "@/lib/validation";
 
 export class AccountNotFoundError extends Error {}
@@ -32,7 +32,7 @@ async function lockAccounts(tx: DbTransaction, ids: string[]) {
     .for("update");
 }
 export async function listLoginAccounts(search = "", limit = 50, offset = 0) {
-  await assertOwner();
+  await assertReadOwner();
   const text = search.slice(0, 64).replace(/[\\%_]/g, "\\$&");
   const filter = text
     ? or(

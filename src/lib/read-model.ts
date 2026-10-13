@@ -11,13 +11,13 @@ import {
 import { getMemberHistory, getMemberIdentity } from "@/lib/member-history";
 import { projectMember } from "@/lib/member-privacy";
 import { listMembersWithAccounts } from "@/lib/members";
-import { getSession } from "@/lib/session";
+import { getReadSession } from "@/lib/session";
 import { parsePageNumber } from "@/lib/validation";
 import { cachedQuery } from "@/lib/query-cache";
 
 /** Check live credentials before every role-specific cache read. */
 async function readRole() {
-  const session = await getSession();
+  const session = await getReadSession();
   if (!session) redirect("/login");
   return session.role;
 }

@@ -9,7 +9,7 @@ import {
   listUnlinkedAccounts,
 } from "@/lib/members";
 import { riotId } from "@/lib/format";
-import { getSession } from "@/lib/session";
+import { getReadSession } from "@/lib/session";
 
 import {
   AdminFeedbackProvider,
@@ -83,7 +83,7 @@ export default async function AdminPage({
     accountPage?: string | string[];
   }>;
 } = {}) {
-  const session = await getSession();
+  const session = await getReadSession();
   if (!session) redirect("/login?redirectTo=%2Fadmin");
   if (session.role === "viewer") redirect("/members");
 

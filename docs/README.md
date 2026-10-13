@@ -22,6 +22,7 @@
 - [리뷰 수정·검색 인덱스](../openspec/changes/fix-review-findings-and-index-search/): 등록 전 가입 판정, 최신 Riot 이름 보존, Unicode 검증과 DB 정확 검색
 - [모임원·경기 관리 개선](../openspec/changes/refine-member-and-game-management/): 보호된 실제 삭제, 활성 경기의 미연결 계정, 날짜·코멘트와 관리 표 페이징
 - [Upstash Redis 전환](../openspec/changes/migrate-cache-to-upstash-redis/): 싱가포르 Redis 연결과 제공자 설정 전환
+- [캐시·인증 조회 지연 개선](../openspec/changes/remove-cache-and-auth-read-latency/): 캐시 장애 제한과 요청 안의 읽기 인증 중복 제거
 - [Layerbase Valkey 캐시](../openspec/changes/add-layerbase-valkey-cache/): 권한별 조회 캐시, 무효화와 닉네임 자동완성·검색
 - [이전 업로더·관리자 권한 분리](../openspec/changes/add-uploader-admin-roles/): 역할별 권한·세션·키 교체와 전환 정책
 
@@ -32,6 +33,7 @@ OpenSpec 문서는 요구사항·설계·작업 이력을 보관합니다. 실�
 이 문서들은 해당 날짜의 코드·리소스·테스트 결과를 기록한 자료입니다. 당시의 배포 ID,
 적용된 마이그레이션 수, 남은 작업은 현재 상태와 다를 수 있습니다.
 
+- [2026-10-14 캐시·인증 조회 지연](validation/2026-10-14-cache-auth-latency.md): 실제 Redis 응답 중단, 인증 조회 횟수·요청 격리와 792개 전체 테스트
 - [2026-10-14 Upstash Redis](validation/2026-10-14-upstash-redis.md): 싱가포르 Redis 전환, 실제 Redis·PostgreSQL·리플레이 포함 Node 24 전체 검증
 - [2026-10-12 리뷰 수정·DB 검색 인덱스](validation/2026-10-12-review-fixes.md): 최초 로그인 경합·리플레이 이름·Unicode 오류 수정, 1만 명 검색 실행 계획과 Node 24 전체 776개 테스트
 

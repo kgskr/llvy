@@ -94,7 +94,7 @@ Discord 계정·grant에는 게임 멤버 FK가 없어 삭제가 로그인 권�
 
 조회 모델은 세션 확인 후 [Redis](redis.md)에 역할별로 투영한 결과를 60초간 캐시합니다.
 데이터 변경 커밋 후 공유 세대 UUID를 교체하며 이전 조회는 캡처한 세대에만 저장합니다.
-인증 계정·세션·grant·감사·요청 제한은 캐시하지 않습니다. 모임원 상세는 통계 캐시와 별개로
+인증 계정·세션·grant·감사·요청 제한은 공유 Redis에 캐시하지 않습니다. 모임원 상세는 통계 캐시와 별개로
 현재 DB의 모임원 존재·이름을 확인하며 일반 사용자에게 생년을 전달하지 않습니다.
 
 메인 폼은 `GET /search?q=...`, 자동완성은 `/api/search/autocomplete?q=...`를 사용합니다.
@@ -148,6 +148,13 @@ OAuth 시도는 10분 만료 state/브라우저 nonce 해시를 저장하고 cal
 매 보호 요청에서 확인합니다. 독립 `AUTH_SECRET`은 32 UTF-8 바이트 이상의 서버 비밀이며
 교체하면 모든 기존 쿠키를 거부합니다. v4 이하는 거부합니다. Proxy는 서명 쿠키만 선별하고
 실제 인가는 DAL·Action·API·변경 transaction이 수행합니다.
+
+페이지·레이아웃·읽기 DAL은 `getReadSession()`의 React `cache()`로 렌더링 안의 인증 Promise를
+공유합니다. React 렌더 밖의 자동완성 GET은 `withReadSession()`의 AsyncLocalStorage 범위로
+핸들러와 DAL의 중복 인증을 합칩니다. concurrent 요청과 다음 요청은 별도로 DB에서 확인하며
+인증 실패·null도 그 읽기 요청 안에서만 공유합니다. 읽기 중 권한이 바뀌면 다음 요청에서 반영됩니다.
+`getSession()`·`assertAdmin()`·`assertOwner()`는 항상 새로 조회하므로 변경 작업과 Blob 토큰 발급
+직전 재검증은 유지합니다. transaction의 계정·세션·grant 잠금도 유지합니다.
 
 일반 보호 요청에는 Discord 조회나 membership TTL이 없습니다. 외부 장애 중에도 현재 DB
 권한으로 접근합니다. 최초 로그인과 관리자 부여는 새 bot 조회가 필요합니다. 일일 Cron은

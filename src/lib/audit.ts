@@ -110,8 +110,8 @@ export async function withActorTransaction<T>(
 }
 
 export async function listAuditLogs(limit = 50, offset = 0) {
-  const { assertOwner } = await import("@/lib/session");
-  await assertOwner();
+  const { assertReadOwner } = await import("@/lib/session");
+  await assertReadOwner();
   return db
     .select()
     .from(auditLogs)

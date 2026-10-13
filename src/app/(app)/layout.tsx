@@ -4,14 +4,14 @@ import { redirect } from "next/navigation";
 
 import { logout } from "@/app/login/actions";
 import loliveYoung from "@/assets/lolive-young.jpeg";
-import { getSession } from "@/lib/session";
+import { getReadSession } from "@/lib/session";
 
 export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const session = await getSession();
+  const session = await getReadSession();
   if (!session) redirect("/login");
   const isAdmin = session.role !== "viewer";
   const roleLabel = {

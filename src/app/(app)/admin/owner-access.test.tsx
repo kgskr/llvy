@@ -19,7 +19,7 @@ vi.mock("next/navigation", () => ({
     throw new Error(`redirect:${destination}`);
   },
 }));
-vi.mock("@/lib/session", () => ({ getSession: mocks.getSession }));
+vi.mock("@/lib/session", () => ({ getReadSession: mocks.getSession }));
 vi.mock("@/lib/members", () => ({
   listMembersWithAccounts: mocks.listMembers,
   listUnlinkedAccounts: mocks.listUnlinked,
