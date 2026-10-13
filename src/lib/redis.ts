@@ -17,11 +17,11 @@ function warnUnavailable() {
   if (Date.now() - lastWarningAt < 30_000) return;
   lastWarningAt = Date.now();
   // Never log the URL, credentials or a driver's raw error.
-  console.warn("Valkey cache unavailable; using PostgreSQL directly.");
+  console.warn("Redis cache unavailable; using PostgreSQL directly.");
 }
 
 function configuration() {
-  const value = process.env.VALKEY_URL?.trim();
+  const value = process.env.REDIS_URL?.trim();
   if (!value) return null;
   const url = new URL(value);
   const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
@@ -33,7 +33,7 @@ function configuration() {
       process.env.NODE_ENV !== "production"
     )
   )
-    throw new Error("Valkey requires TLS outside local development.");
+    throw new Error("Redis requires TLS outside local development.");
 
   // Identify the database without retaining its password in cache keys.
   const postgres = process.env.POSTGRES_URL;
@@ -45,7 +45,7 @@ function configuration() {
     .update(identity)
     .digest("hex")
     .slice(0, 16);
-  const prefix = process.env.VALKEY_KEY_PREFIX?.trim() || "llvy";
+  const prefix = process.env.REDIS_KEY_PREFIX?.trim() || "llvy";
   const environment =
     process.env.VERCEL_ENV || process.env.NODE_ENV || "development";
   return {
@@ -57,22 +57,22 @@ function configuration() {
 }
 
 /** Close only this app's connection; no keys or server data are deleted. */
-export function disconnectValkey(): void {
+export function disconnectRedis(): void {
   connection?.client.disconnect();
   connection = null;
   retryAt = 0;
 }
 
-export function valkeyFailed(client: Redis): void {
+export function redisFailed(client: Redis): void {
   if (connection?.client === client) {
-    disconnectValkey();
+    disconnectRedis();
     retryAt = Date.now() + RETRY_DELAY_MS;
   }
   warnUnavailable();
 }
 
 /** One lazy connection per warm Node.js instance, shared by concurrent reads. */
-export async function getValkeyConnection() {
+export async function getRedisConnection() {
   let config: ReturnType<typeof configuration>;
   try {
     config = configuration();
@@ -81,7 +81,7 @@ export async function getValkeyConnection() {
     return null;
   }
   if (!config) return null;
-  if (connection && connection.url !== config.url) disconnectValkey();
+  if (connection && connection.url !== config.url) disconnectRedis();
   if (Date.now() < retryAt) return null;
   if (!connection) {
     let client: Redis;
@@ -105,7 +105,7 @@ export async function getValkeyConnection() {
     let deadline: ReturnType<typeof setTimeout>;
     const timeout = new Promise<never>((_, reject) => {
       deadline = setTimeout(
-        () => reject(new Error("Valkey readiness timeout")),
+        () => reject(new Error("Redis readiness timeout")),
         TIMEOUT_MS,
       );
     });
@@ -113,7 +113,7 @@ export async function getValkeyConnection() {
       .then(
         () => client,
         () => {
-          valkeyFailed(client);
+          redisFailed(client);
           return null;
         },
       )
@@ -123,7 +123,7 @@ export async function getValkeyConnection() {
   const client = await connection.ready;
   if (!client) return null;
   if (client.status !== "ready") {
-    valkeyFailed(client);
+    redisFailed(client);
     return null;
   }
   return { client, prefix: config.prefix };

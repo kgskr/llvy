@@ -19,42 +19,42 @@ vi.mock("ioredis", () => ({
   },
 }));
 
-import { disconnectValkey, getValkeyConnection } from "./valkey";
+import { disconnectRedis, getRedisConnection } from "./redis";
 
 beforeEach(() => {
-  disconnectValkey();
+  disconnectRedis();
   vi.clearAllMocks();
   mocks.connect.mockResolvedValue(undefined);
   vi.stubEnv(
-    "VALKEY_URL",
-    "rediss://default:fixture-password@valkey.example:6379",
+    "REDIS_URL",
+    "rediss://default:fixture-password@redis.example:6379",
   );
   vi.stubEnv(
     "POSTGRES_URL",
     "postgres://fixture:fixture@database.example/club",
   );
-  vi.stubEnv("VALKEY_KEY_PREFIX", "fixture");
+  vi.stubEnv("REDIS_KEY_PREFIX", "fixture");
   vi.stubEnv("VERCEL_ENV", "preview");
 });
 afterEach(() => {
-  disconnectValkey();
+  disconnectRedis();
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
 });
 
-describe("Layerbase VALKEY_URL connection", () => {
+describe("Upstash REDIS_URL connection", () => {
   it("shares a TLS connection across concurrent calls with bounded waits", async () => {
     const [one, two] = await Promise.all([
-      getValkeyConnection(),
-      getValkeyConnection(),
+      getRedisConnection(),
+      getRedisConnection(),
     ]);
     expect(one?.client).toBe(two?.client);
     expect(mocks.constructed).toHaveBeenCalledTimes(1);
     expect(mocks.connect).toHaveBeenCalledTimes(1);
     const options = mocks.constructed.mock.calls[0][1];
     expect(options).toMatchObject({
-      tls: { servername: "valkey.example" },
+      tls: { servername: "redis.example" },
       lazyConnect: true,
       connectTimeout: 1000,
       commandTimeout: 1000,
@@ -67,9 +67,34 @@ describe("Layerbase VALKEY_URL connection", () => {
   });
 
   it("does not connect when the optional URL is absent", async () => {
-    vi.stubEnv("VALKEY_URL", "");
-    expect(await getValkeyConnection()).toBeNull();
+    vi.stubEnv("REDIS_URL", "");
+    expect(await getRedisConnection()).toBeNull();
     expect(mocks.constructed).not.toHaveBeenCalled();
+  });
+
+  it("does not reconnect to the retired provider when REDIS_URL is missing", async () => {
+    vi.stubEnv("REDIS_URL", "");
+    vi.stubEnv("VALKEY_URL", "rediss://default:old-password@old.example:6379");
+    expect(await getRedisConnection()).toBeNull();
+    expect(mocks.constructed).not.toHaveBeenCalled();
+  });
+
+  it("uses REDIS_URL and replaces the connection when its endpoint changes", async () => {
+    vi.stubEnv("VALKEY_URL", "rediss://default:old-password@old.example:6379");
+    const first = await getRedisConnection();
+    const replacement =
+      "rediss://default:new-password@replacement.upstash.io:6379";
+    vi.stubEnv("REDIS_URL", replacement);
+    const second = await getRedisConnection();
+    expect(second?.client).not.toBe(first?.client);
+    expect(mocks.disconnect).toHaveBeenCalledTimes(1);
+    expect(mocks.constructed).toHaveBeenLastCalledWith(
+      replacement,
+      expect.objectContaining({
+        tls: { servername: "replacement.upstash.io" },
+      }),
+    );
+    expect(mocks.connect).toHaveBeenCalledTimes(2);
   });
 
   it.each([
@@ -80,8 +105,8 @@ describe("Layerbase VALKEY_URL connection", () => {
     "rejects insecure or malformed remote URLs without logging secrets",
     async (url) => {
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-      vi.stubEnv("VALKEY_URL", url);
-      expect(await getValkeyConnection()).toBeNull();
+      vi.stubEnv("REDIS_URL", url);
+      expect(await getRedisConnection()).toBeNull();
       expect(mocks.constructed).not.toHaveBeenCalled();
       expect(JSON.stringify(warn.mock.calls)).not.toContain("fixture-password");
     },
@@ -89,27 +114,27 @@ describe("Layerbase VALKEY_URL connection", () => {
 
   it("permits local plaintext tests but rejects plaintext in production", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.stubEnv("VALKEY_URL", "redis://127.0.0.1:16379");
-    expect(await getValkeyConnection()).not.toBeNull();
-    disconnectValkey();
+    vi.stubEnv("REDIS_URL", "redis://127.0.0.1:16379");
+    expect(await getRedisConnection()).not.toBeNull();
+    disconnectRedis();
     vi.stubEnv("NODE_ENV", "production");
-    expect(await getValkeyConnection()).toBeNull();
+    expect(await getRedisConnection()).toBeNull();
   });
 
   it("separates environments and DBs while a DB password rotation retains the namespace", async () => {
-    const first = await getValkeyConnection();
+    const first = await getRedisConnection();
     vi.stubEnv(
       "POSTGRES_URL",
       "postgres://fixture:new-password@database.example/club",
     );
-    expect((await getValkeyConnection())?.prefix).toBe(first?.prefix);
+    expect((await getRedisConnection())?.prefix).toBe(first?.prefix);
     vi.stubEnv(
       "POSTGRES_URL",
       "postgres://fixture:fixture@database.example/other",
     );
-    expect((await getValkeyConnection())?.prefix).not.toBe(first?.prefix);
+    expect((await getRedisConnection())?.prefix).not.toBe(first?.prefix);
     vi.stubEnv("VERCEL_ENV", "production");
-    expect((await getValkeyConnection())?.prefix).not.toBe(first?.prefix);
+    expect((await getRedisConnection())?.prefix).not.toBe(first?.prefix);
   });
 
   it("falls back after a connection failure and retries only after the cooldown", async () => {
@@ -119,11 +144,11 @@ describe("Layerbase VALKEY_URL connection", () => {
     mocks.connect.mockRejectedValueOnce(
       new Error("fixture-password connection failed"),
     );
-    expect(await getValkeyConnection()).toBeNull();
-    expect(await getValkeyConnection()).toBeNull();
+    expect(await getRedisConnection()).toBeNull();
+    expect(await getRedisConnection()).toBeNull();
     expect(mocks.connect).toHaveBeenCalledTimes(1);
     now += 5001;
-    expect(await getValkeyConnection()).not.toBeNull();
+    expect(await getRedisConnection()).not.toBeNull();
     expect(mocks.connect).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(warn.mock.calls)).not.toContain("fixture-password");
   });
@@ -132,7 +157,7 @@ describe("Layerbase VALKEY_URL connection", () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.useFakeTimers();
     mocks.connect.mockImplementationOnce(() => new Promise(() => {}));
-    const connecting = getValkeyConnection();
+    const connecting = getRedisConnection();
     await vi.advanceTimersByTimeAsync(1001);
     expect(await connecting).toBeNull();
     expect(mocks.disconnect).toHaveBeenCalledTimes(1);

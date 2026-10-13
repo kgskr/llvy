@@ -54,7 +54,7 @@ import unicode from "./search-unicode-data.json";
 beforeAll(migrateTestDatabase, 30_000);
 beforeEach(async () => {
   await resetTestDatabase();
-  vi.stubEnv("VALKEY_URL", "");
+  vi.stubEnv("REDIS_URL", "");
   vi.stubEnv("VERCEL", "");
   mocks.token = (await createTestSession("owner")).token;
   vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_review_secret");

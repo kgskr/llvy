@@ -1,7 +1,7 @@
 import "server-only";
 
 import { createHash, randomUUID } from "node:crypto";
-import { getValkeyConnection, valkeyFailed } from "@/lib/valkey";
+import { getRedisConnection, redisFailed } from "@/lib/redis";
 
 export const QUERY_CACHE_TTL_SECONDS = 60;
 const MAX_VALUE_BYTES = 256 * 1024;
@@ -15,7 +15,7 @@ type CacheIdentity = {
 
 /** Shared by query results and nickname indexes; callers handle cache errors. */
 export async function getQueryCacheGeneration(
-  connection: NonNullable<Awaited<ReturnType<typeof getValkeyConnection>>>,
+  connection: NonNullable<Awaited<ReturnType<typeof getRedisConnection>>>,
 ): Promise<string | null> {
   const generationKey = `${connection.prefix}:generation`;
   let generation = await connection.client.get(generationKey);
@@ -31,7 +31,7 @@ export async function cachedQuery<T>(
   identity: CacheIdentity,
   load: () => Promise<T>,
 ): Promise<T> {
-  const connection = await getValkeyConnection();
+  const connection = await getRedisConnection();
   if (!connection) return load();
   const { client, prefix } = connection;
   let key: string;
@@ -58,7 +58,7 @@ export async function cachedQuery<T>(
       }
     }
   } catch {
-    valkeyFailed(client);
+    redisFailed(client);
     return load();
   }
 
@@ -73,14 +73,14 @@ export async function cachedQuery<T>(
     if (Buffer.byteLength(stored) <= MAX_VALUE_BYTES)
       await client.set(key, stored, "EX", QUERY_CACHE_TTL_SECONDS);
   } catch {
-    valkeyFailed(client);
+    redisFailed(client);
   }
   return value;
 }
 
 /** Best effort after DB commit. Old fills remain in their captured generation. */
 export async function invalidateQueryCache(): Promise<void> {
-  const connection = await getValkeyConnection();
+  const connection = await getRedisConnection();
   if (!connection) return;
   try {
     await connection.client.set(
@@ -88,6 +88,6 @@ export async function invalidateQueryCache(): Promise<void> {
       randomUUID(),
     );
   } catch {
-    valkeyFailed(connection.client);
+    redisFailed(connection.client);
   }
 }
