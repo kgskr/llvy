@@ -21,7 +21,7 @@ export async function createMember(
 ): Promise<string> {
   const actor = await assertAdmin();
   ({ name, birthYear } = validatedMember(name, birthYear));
-  return withActorTransaction(actor, async (tx) => {
+  return withActorTransaction(actor, async (tx, changes) => {
     const [row] = await tx
       .insert(members)
       .values({ name, birthYear })
@@ -32,6 +32,7 @@ export async function createMember(
       targetId: row.id,
       after: { name, birthYear },
     });
+    changes.add("members");
     return row.id;
   });
 }
@@ -43,13 +44,15 @@ export async function updateMember(
 ): Promise<boolean> {
   const actor = await assertAdmin();
   ({ name, birthYear } = validatedMember(name, birthYear));
-  return withActorTransaction(actor, async (tx) => {
+  return withActorTransaction(actor, async (tx, changes) => {
     const [before] = await tx
       .select({ name: members.name, birthYear: members.birthYear })
       .from(members)
       .where(eq(members.id, id))
       .for("update");
     if (!before) return false;
+    if (before.name === name && before.birthYear === birthYear) return true;
+    changes.add("members");
     await tx.update(members).set({ name, birthYear }).where(eq(members.id, id));
     await appendAudit(tx, actor, {
       action: "member.updated",
@@ -67,7 +70,7 @@ async function changeAccountLink(
   memberId: string | null,
 ): Promise<boolean> {
   const actor = await assertAdmin();
-  return withActorTransaction(actor, async (tx) => {
+  return withActorTransaction(actor, async (tx, changes) => {
     // Target member before account, matching deletion's lock order.
     if (memberId !== null) {
       const [member] = await tx
@@ -83,6 +86,10 @@ async function changeAccountLink(
       .where(eq(riotAccounts.id, accountId))
       .for("update");
     if (!before) return false;
+    if (before.memberId === memberId) return true;
+    changes.add("accounts");
+    changes.add("history");
+    changes.add("riot-eligibility");
     await tx
       .update(riotAccounts)
       .set({ memberId, linkedAt: memberId ? new Date() : null })
@@ -112,7 +119,7 @@ export function unlinkAccount(accountId: string): Promise<boolean> {
 export async function deleteMember(id: string): Promise<boolean> {
   const actor = await assertAdmin();
   if (!isUuid(id)) return false;
-  return withActorTransaction(actor, async (tx) => {
+  return withActorTransaction(actor, async (tx, changes) => {
     const [before] = await tx
       .select({ name: members.name, birthYear: members.birthYear })
       .from(members)
@@ -124,6 +131,12 @@ export async function deleteMember(id: string): Promise<boolean> {
       .set({ memberId: null, linkedAt: null })
       .where(eq(riotAccounts.memberId, id))
       .returning({ id: riotAccounts.id });
+    changes.add("members");
+    if (detached.length) {
+      changes.add("accounts");
+      changes.add("history");
+      changes.add("riot-eligibility");
+    }
     for (const account of detached) {
       await appendAudit(tx, actor, {
         action: "account.unlinked",

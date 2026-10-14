@@ -57,6 +57,13 @@
       "when": 1791736070468,
       "tag": "0007_review_fixes_indexed_search",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1792000044457,
+      "tag": "0008_cache_revisions",
+      "breakpoints": true
     }
   ]
 }

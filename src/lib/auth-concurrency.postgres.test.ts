@@ -78,6 +78,14 @@ import {
 } from "@/lib/account-administration";
 import { createLoginAttempt, consumeLoginAttempt } from "@/lib/oauth-attempts";
 
+import { db } from "@/db";
+import { bumpCacheRevisions, readCacheRevision } from "./cache-revisions";
+import { createMember, deleteMember, linkAccount } from "./member-mutations";
+import { setGameExcluded, setGamePlayedAt } from "./game-mutations";
+import { ingestReplay } from "./ingest";
+import { replayBytes, replayPlayer } from "@/test/replay";
+import { eq } from "drizzle-orm";
+
 const OWNER_USER = "111111111111111111";
 const TARGET_USER = "444444444444444444";
 const GUILD = "222222222222222222";
@@ -111,6 +119,10 @@ describe.skipIf(!process.env.LLVY_POSTGRES_TEST_URL)(
         "TRUNCATE auth_membership_decisions, audit_logs, admin_grants, auth_sessions, auth_accounts, pending_uploads, oauth_login_attempts, discord_api_controls, request_budgets, game_participants, games, riot_accounts, members CASCADE",
       );
       state.queries = [];
+      vi.stubEnv("REDIS_URL", "");
+      await state.pool!.query(
+        "UPDATE cache_policy SET enabled = true; UPDATE cache_revisions SET revision = 0",
+      );
       vi.stubEnv(
         "AUTH_SECRET",
         "isolated-postgres-test-secret-more-than-32-bytes",
@@ -137,6 +149,231 @@ describe.skipIf(!process.env.LLVY_POSTGRES_TEST_URL)(
     afterAll(async () => {
       await state.pool?.end();
     });
+
+    async function loginCacheOwner() {
+      state.token = (
+        await completeDiscordLogin(
+          { id: OWNER_USER, username: "owner", displayName: "owner" },
+          {
+            userId: OWNER_USER,
+            guildId: GUILD,
+            version: 1,
+            status: "member",
+            checkedAt: new Date(),
+          },
+        )
+      ).token;
+      return (await getSession())!;
+    }
+
+    it("keeps legacy conflict resolution atomic against concurrent PUUID promotion", async () => {
+      const actor = await loginCacheOwner();
+      const barrier = await state.pool!.connect();
+      const writer = await state.pool!.connect();
+      await writer.query("SET application_name = 'llvy-cache-race-fixture'");
+      const writerPid = (await writer.query("SELECT pg_backend_pid() AS pid"))
+        .rows[0].pid;
+      await barrier.query("SELECT pg_advisory_lock($1), pg_advisory_lock($2)", [
+        BARRIER,
+        BARRIER + 1,
+      ]);
+      await state.pool!.query(`
+        CREATE FUNCTION pause_legacy_insert() RETURNS trigger AS $$ BEGIN
+          IF NEW.game_name = 'LegacyRace' AND NEW.puuid IS NULL AND current_setting('application_name') = 'llvy-auth-regression' THEN
+            PERFORM set_config('llvy.cache_race', '1', true);
+            PERFORM pg_advisory_xact_lock(${BARRIER});
+          END IF; RETURN NEW;
+        END; $$ LANGUAGE plpgsql;
+        CREATE FUNCTION pause_legacy_statement() RETURNS trigger AS $$ BEGIN
+          IF current_setting('llvy.cache_race', true) = '1' THEN
+            PERFORM pg_advisory_xact_lock(${BARRIER + 1});
+          END IF; RETURN NULL;
+        END; $$ LANGUAGE plpgsql;
+        CREATE TRIGGER pause_legacy_insert BEFORE INSERT ON riot_accounts FOR EACH ROW EXECUTE FUNCTION pause_legacy_insert();
+        CREATE TRIGGER pause_legacy_statement AFTER INSERT ON riot_accounts FOR EACH STATEMENT EXECUTE FUNCTION pause_legacy_statement();
+      `);
+      const ingesting = ingestReplay({
+        bytes: replayBytes({
+          players: [
+            replayPlayer({ RIOT_ID_GAME_NAME: "LegacyRace", PUUID: null }),
+          ],
+        }),
+        actor,
+        blobUrl: "https://fixture.invalid/legacy-race.rofl",
+        originalFilename: "legacy-race.rofl",
+        lastModified: Date.now(),
+      });
+      let promoting: Promise<unknown> | undefined;
+      try {
+        await waitForLock(true);
+        const {
+          rows: [legacy],
+        } = await writer.query(
+          "INSERT INTO riot_accounts(game_name, tag_line) VALUES ('LegacyRace', 'KR1') RETURNING id",
+        );
+        const before = await readCacheRevision(["accounts"]);
+        await barrier.query("SELECT pg_advisory_unlock($1)", [BARRIER]);
+        // The second barrier is entered after the conflict statement has run.
+        await expect
+          .poll(
+            async () =>
+              (
+                await state.pool!.query(
+                  "SELECT count(*)::int AS n FROM pg_locks WHERE locktype='advisory' AND NOT granted AND objid=$1",
+                  [BARRIER + 1],
+                )
+              ).rows[0].n,
+          )
+          .toBe(1);
+        promoting = writer.query(
+          "UPDATE riot_accounts SET puuid = 'race-puuid' WHERE id = $1 AND puuid IS NULL",
+          [legacy.id],
+        );
+        await expect
+          .poll(
+            async () =>
+              (
+                await state.pool!.query(
+                  "SELECT wait_event_type FROM pg_stat_activity WHERE pid=$1",
+                  [writerPid],
+                )
+              ).rows[0].wait_event_type,
+          )
+          .toBe("Lock");
+        await barrier.query("SELECT pg_advisory_unlock($1)", [BARRIER + 1]);
+        const saved = await ingesting;
+        await promoting;
+        expect(await readCacheRevision(["accounts"])).toEqual(before);
+        const participant = (
+          await state.pool!.query(
+            "SELECT riot_account_id FROM game_participants WHERE game_id=$1",
+            [saved.gameId],
+          )
+        ).rows[0];
+        expect(participant.riot_account_id).toBe(legacy.id);
+        expect(
+          (
+            await state.pool!.query(
+              "SELECT puuid FROM riot_accounts WHERE id=$1",
+              [legacy.id],
+            )
+          ).rows[0].puuid,
+        ).toBe("race-puuid");
+      } finally {
+        await barrier.query("SELECT pg_advisory_unlock_all()");
+        await Promise.allSettled([ingesting, promoting]);
+        await writer.query("SET application_name = 'llvy-auth-regression'");
+        writer.release();
+        barrier.release();
+        await state.pool!.query(
+          "DROP TRIGGER pause_legacy_insert ON riot_accounts; DROP TRIGGER pause_legacy_statement ON riot_accounts; DROP FUNCTION pause_legacy_insert(); DROP FUNCTION pause_legacy_statement();",
+        );
+      }
+    }, 20000);
+
+    it("rolls back business data and an already bumped revision atomically", async () => {
+      await loginCacheOwner();
+      const memberId = await createMember("변경 전", null);
+      const before = await readCacheRevision(["members"]);
+      await expect(
+        db.transaction(async (tx) => {
+          await tx
+            .update(schema.members)
+            .set({ name: "롤백" })
+            .where(eq(schema.members.id, memberId));
+          await bumpCacheRevisions(tx, ["members", "members"]);
+          throw new Error("forced rollback");
+        }),
+      ).rejects.toThrow("forced rollback");
+      expect(await readCacheRevision(["members"])).toEqual(before);
+      expect(
+        (
+          await state.pool!.query("SELECT name FROM members WHERE id = $1", [
+            memberId,
+          ])
+        ).rows[0].name,
+      ).toBe("변경 전");
+    });
+
+    it("serializes overlapping member, game and ingest writers after business locks without losing revisions", async () => {
+      const actor = await loginCacheOwner();
+      const input = {
+        bytes: replayBytes(),
+        blobUrl: "https://fixture.invalid/cache.rofl",
+        originalFilename: "cache.rofl",
+        lastModified: Date.now(),
+        actor,
+      };
+      const game = await ingestReplay(input);
+      const memberId = await createMember("동시 변경", null);
+      const accountId = (
+        await state.pool!.query(
+          "SELECT id FROM riot_accounts ORDER BY id LIMIT 1",
+        )
+      ).rows[0].id;
+      await linkAccount(accountId, memberId);
+      const before = await readCacheRevision([
+        "accounts",
+        "history",
+        "game-list",
+      ]);
+      const barrier = await state.pool!.connect();
+      await barrier.query("SELECT pg_advisory_lock($1)", [BARRIER]);
+      await state.pool!.query(`
+        CREATE FUNCTION pause_cache_revision() RETURNS trigger AS $$
+        BEGIN PERFORM pg_advisory_xact_lock(${BARRIER}); RETURN NEW; END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER pause_cache_revision BEFORE INSERT OR UPDATE ON cache_revisions
+        FOR EACH ROW EXECUTE FUNCTION pause_cache_revision();
+      `);
+      let tasks: Promise<unknown>[] = [];
+      try {
+        const removal = deleteMember(memberId);
+        tasks = [removal];
+        await waitForLock(true);
+        tasks.push(
+          linkAccount(accountId, memberId),
+          setGameExcluded(game.gameId, true),
+          ingestReplay({
+            ...input,
+            bytes: replayBytes({ metadata: { gameLength: 2000000 } }),
+          }),
+        );
+        await waitForLock(false);
+        await barrier.query("SELECT pg_advisory_unlock($1)", [BARRIER]);
+        const results = await Promise.allSettled(tasks);
+        expect(results.every((result) => result.status === "fulfilled")).toBe(
+          true,
+        );
+        expect(results[1]).toMatchObject({ status: "fulfilled", value: false });
+        const after = await readCacheRevision([
+          "accounts",
+          "history",
+          "game-list",
+        ]);
+        expect(
+          BigInt(after!.values.accounts) - BigInt(before!.values.accounts),
+        ).toBe(BigInt(1));
+        expect(
+          BigInt(after!.values.history) - BigInt(before!.values.history),
+        ).toBe(BigInt(3));
+        expect(
+          BigInt(after!.values["game-list"]) -
+            BigInt(before!.values["game-list"]),
+        ).toBe(BigInt(2));
+        await Promise.all([
+          setGamePlayedAt(game.gameId, "2026-10-01"),
+          setGameExcluded(game.gameId, false),
+        ]);
+      } finally {
+        await barrier.query("SELECT pg_advisory_unlock($1)", [BARRIER]);
+        await Promise.allSettled(tasks);
+        barrier.release();
+        await state.pool!.query(
+          "DROP TRIGGER pause_cache_revision ON cache_revisions; DROP FUNCTION pause_cache_revision();",
+        );
+      }
+    }, 20000);
 
     it.each([
       ["absent", true],

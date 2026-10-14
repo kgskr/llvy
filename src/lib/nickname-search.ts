@@ -5,6 +5,11 @@ import { union } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { gameParticipants, games, members, riotAccounts } from "@/db/schema";
 import { cachedQuery } from "@/lib/query-cache";
+import {
+  prepareCache,
+  cacheDependencies,
+  type CacheContext,
+} from "@/lib/cache-context";
 import { assertSession } from "@/lib/session";
 import {
   normalizeNicknamePart,
@@ -46,23 +51,30 @@ export async function autocompleteStoredNicknames(input: string) {
   return autocompleteAccounts(input);
 }
 
-async function autocompleteAccounts(input: string) {
+async function autocompleteAccounts(
+  input: string,
+  context?: CacheContext | null,
+) {
   const prefix = normalizeNicknamePrefix(input);
   if (!prefix) return [];
-  return queryNicknameAutocomplete(prefix, () =>
-    db
-      .select({
-        id: riotAccounts.id,
-        gameName: riotAccounts.gameName,
-        tagLine: riotAccounts.tagLine,
-      })
-      .from(riotAccounts)
-      .where(and(isNotNull(riotAccounts.memberId), activeHistory)),
+  return queryNicknameAutocomplete(
+    prefix,
+    () =>
+      db
+        .select({
+          id: riotAccounts.id,
+          gameName: riotAccounts.gameName,
+          tagLine: riotAccounts.tagLine,
+        })
+        .from(riotAccounts)
+        .where(and(isNotNull(riotAccounts.memberId), activeHistory)),
+    context,
   );
 }
 
 const queryMemberAutocomplete = createAutocompleteIndex<MemberSuggestion>({
   namespace: "member-autocomplete:v1",
+  scopes: ["members", "accounts"],
   indexedName: memberIndexKey,
   project(value) {
     const safe = projectSearchSuggestion(value);
@@ -120,9 +132,21 @@ export async function autocompleteSearch(input: string) {
   const prefix = normalizeSearchInput(input);
   if (!prefix) return [];
   // A failed source rejects the whole request; partial results hide real matches.
+  const context = await prepareCache([
+    "members",
+    "accounts",
+    "riot-eligibility",
+  ]);
   const [memberMatches, accounts] = await Promise.all([
-    queryMemberAutocomplete(prefix, loadSearchMembers),
-    autocompleteAccounts(input),
+    queryMemberAutocomplete(
+      prefix,
+      loadSearchMembers,
+      cacheDependencies(context, ["members", "accounts"]),
+    ),
+    autocompleteAccounts(
+      input,
+      cacheDependencies(context, ["accounts", "riot-eligibility"]),
+    ),
   ]);
   return mergeSearchSuggestions([
     ...memberMatches,
@@ -277,8 +301,14 @@ export async function searchStoredNicknames(input: string) {
   const session = await assertSession();
   const search = normalizeNicknameSearch(input);
   if (!search) return [];
+  const context = await prepareCache([
+    "members",
+    "accounts",
+    "riot-eligibility",
+  ]);
   return cachedQuery(
     {
+      policy: "search",
       query: "nickname-search",
       role: session.role,
       args: [search.gameName, search.tagLine],
@@ -309,5 +339,6 @@ export async function searchStoredNicknames(input: string) {
         )
         .slice(0, 20);
     },
+    context,
   );
 }

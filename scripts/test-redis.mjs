@@ -22,6 +22,7 @@ const result = spawnSync(
     "run",
     "src/lib/redis.test.ts",
     "src/lib/query-cache.integration.test.ts",
+    "src/lib/cache-process.redis.test.ts",
   ],
   {
     stdio: "inherit",

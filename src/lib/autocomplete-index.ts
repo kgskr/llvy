@@ -1,10 +1,16 @@
 import "server-only";
 
 import { randomUUID } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
+import { prepareCache, type CacheContext } from "@/lib/cache-context";
+import type { CacheScope } from "@/lib/cache-revisions";
+import { cachePublicationScheduler } from "@/lib/cache-lifecycle";
+import { cacheMetric, measureCache } from "@/lib/cache-metrics";
 import type Redis from "ioredis";
 import {
   getQueryCacheGeneration,
   QUERY_CACHE_TTL_SECONDS,
+  cacheTtl,
 } from "@/lib/query-cache";
 import { getRedisConnection, redisFailed } from "@/lib/redis";
 
@@ -12,6 +18,7 @@ import { AUTOCOMPLETE_LIMIT, compareSearchText } from "@/lib/search-contract";
 
 type IndexOptions<T> = {
   namespace: string;
+  scopes?: readonly CacheScope[];
   indexedName: (value: T) => string;
   project: (value: unknown) => T | null;
 };
@@ -45,17 +52,23 @@ return result`;
   // Check both temporary keys before touching either live key. Every publication
   // is atomic, and a failed/evicted build cannot expose half an index.
   const PUBLISH_INDEX = `
+if ARGV[3] ~= '' and redis.call('GET', KEYS[6]) ~= ARGV[3] then return 0 end
 if redis.call('ZCARD', KEYS[1]) ~= tonumber(ARGV[1]) or redis.call('HLEN', KEYS[2]) ~= tonumber(ARGV[1]) then return 0 end
 redis.call('RENAME', KEYS[1], KEYS[3])
 redis.call('RENAME', KEYS[2], KEYS[4])
-redis.call('EXPIRE', KEYS[3], ARGV[2])
-redis.call('EXPIRE', KEYS[4], ARGV[2])
-redis.call('SET', KEYS[5], ARGV[1], 'EX', ARGV[2])
+redis.call('PEXPIREAT', KEYS[3], ARGV[2])
+redis.call('PEXPIREAT', KEYS[4], ARGV[2])
+redis.call('SET', KEYS[5], ARGV[1], 'PXAT', ARGV[2])
 return 1`;
 
-  async function readIndex(client: Redis, key: string, input: string) {
+  async function readIndex(
+    client: Redis,
+    key: string,
+    input: string,
+    context?: CacheContext,
+  ) {
     const bytes = Buffer.from(input);
-    const stored = await client.eval(
+    const stored = await (context?.reads ?? client).eval(
       READ_INDEX,
       3,
       `${key}:names`,
@@ -85,9 +98,34 @@ return 1`;
     return result;
   }
 
-  async function publishIndex(client: Redis, key: string, accounts: T[]) {
+  async function publishIndex(
+    client: Redis,
+    key: string,
+    accounts: T[],
+    ttl: number,
+    token = "",
+  ) {
+    const bytes = Buffer.byteLength(JSON.stringify(accounts));
+    if (accounts.length > 10000 || bytes > 8 * 1024 * 1024) {
+      cacheMetric("index", 0, "oversize", bytes);
+      return;
+    }
+    const expiresAt = Date.now() + ttl * 1000;
     if (accounts.length === 0) {
-      await client.set(`${key}:ready`, "0", "EX", QUERY_CACHE_TTL_SECONDS);
+      await client.eval(
+        `
+if ARGV[2] ~= '' and redis.call('GET', KEYS[4]) ~= ARGV[2] then return 0 end
+redis.call('DEL', KEYS[1], KEYS[2])
+redis.call('SET', KEYS[3], '0', 'PXAT', ARGV[1])
+return 1`,
+        4,
+        `${key}:names`,
+        `${key}:accounts`,
+        `${key}:ready`,
+        `${key}:lease`,
+        expiresAt,
+        token,
+      );
       return;
     }
     const temporary = `${key}:building:${randomUUID()}`;
@@ -111,17 +149,18 @@ return 1`;
     }
     const published = await client.eval(
       PUBLISH_INDEX,
-      5,
+      6,
       `${temporary}:names`,
       `${temporary}:accounts`,
       `${key}:names`,
       `${key}:accounts`,
       `${key}:ready`,
+      `${key}:lease`,
       accounts.length,
-      QUERY_CACHE_TTL_SECONDS,
+      expiresAt,
+      token,
     );
-    if (published !== 1)
-      throw new Error("Index build expired before publication");
+    if (published !== 1) cacheMetric("index", 0, "publication_lost");
   }
 
   const builds = new Map<string, Promise<T[]>>();
@@ -130,6 +169,7 @@ return 1`;
   return async function queryAutocomplete(
     input: string,
     load: () => Promise<T[]>,
+    suppliedContext?: CacheContext | null,
   ): Promise<T[]> {
     const loadSafe = async () =>
       (await load()).map((value) => {
@@ -137,16 +177,32 @@ return 1`;
         if (!safe) throw new Error("Invalid autocomplete source");
         return safe;
       });
-    const connection = await getRedisConnection();
+    const context =
+      suppliedContext !== undefined
+        ? suppliedContext
+        : options.scopes
+          ? await prepareCache(options.scopes)
+          : undefined;
+    if (context === null) return matches(await loadSafe(), input);
+    const connection = context?.connection ?? (await getRedisConnection());
     if (!connection) return matches(await loadSafe(), input);
     const { client, prefix } = connection;
-    let key: string | null = null;
+    const run = <R>(work: () => Promise<R>) =>
+      context ? context.budget.run(work) : work();
+    let key = "";
     try {
-      const generation = await getQueryCacheGeneration(connection);
+      const generation = context
+        ? `r3:${context.revision}`
+        : await getQueryCacheGeneration(connection);
       if (generation) {
         key = `${prefix}:${generation}:${options.namespace}`;
-        const stored = await readIndex(client, key, input);
-        if (stored !== null) return stored;
+        const stored = await measureCache("cache_read_ms", () =>
+          run(() => readIndex(client, key, input, context)),
+        );
+        if (stored !== null) {
+          cacheMetric("index", 0, "hit");
+          return stored;
+        }
       }
     } catch {
       redisFailed(client);
@@ -154,26 +210,108 @@ return 1`;
     }
     if (!key) return matches(await loadSafe(), input);
 
+    const existing = builds.get(key);
+    if (existing) {
+      cacheMetric("index", 0, "coalesced");
+      return matches(structuredClone(await existing), input);
+    }
+    let token = "";
+    let sharedBuild: Promise<T[]> | undefined;
+    if (context) {
+      token = randomUUID();
+      try {
+        const acquired = await run(() =>
+          client.set(`${key}:lease`, token, "PX", 10000, "NX"),
+        );
+        if (!acquired) {
+          token = "";
+          sharedBuild = builds.get(key);
+          if (!sharedBuild) {
+            await run(() => delay(50));
+            const stored = await run(() =>
+              readIndex(client, key, input, context),
+            );
+            if (stored !== null) return stored;
+          }
+        }
+      } catch {
+        redisFailed(client);
+        return matches(await loadSafe(), input);
+      }
+    }
+    // Loader failures must propagate, never become a second DB fallback load.
+    if (sharedBuild) return matches(structuredClone(await sharedBuild), input);
     const indexKey = key;
-
-    let build = builds.get(indexKey);
-    if (!build) {
-      build = (async () => {
-        // DB errors propagate once. Index failure still returns this DB snapshot.
-        const accounts = await loadSafe();
-        try {
-          await publishIndex(client, indexKey, accounts);
-        } catch {
-          redisFailed(client);
+    let deferred = false;
+    let cleanupTimer: ReturnType<typeof setTimeout> | undefined;
+    const release = async () => {
+      if (token)
+        await client.eval(
+          `if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end return 0`,
+          1,
+          `${indexKey}:lease`,
+          token,
+        );
+    };
+    const local = builds.get(key);
+    if (local) {
+      await release().catch(() => redisFailed(client));
+      return matches(structuredClone(await local), input);
+    }
+    if (builds.size >= 256) {
+      await release().catch(() => redisFailed(client));
+      return matches(await loadSafe(), input);
+    }
+    const build = (async () => {
+      try {
+        const accounts = await measureCache("index_build_ms", loadSafe);
+        if (!context || token) {
+          const publish = async () => {
+            try {
+              await measureCache("index_publish_ms", () =>
+                publishIndex(
+                  client,
+                  indexKey,
+                  accounts,
+                  context
+                    ? cacheTtl("index", accounts)
+                    : QUERY_CACHE_TTL_SECONDS,
+                  token,
+                ),
+              );
+            } catch {
+              redisFailed(client);
+            } finally {
+              clearTimeout(cleanupTimer);
+              await release().catch(() => redisFailed(client));
+              if (builds.get(indexKey) === build) builds.delete(indexKey);
+            }
+          };
+          const schedule = cachePublicationScheduler();
+          if (schedule) {
+            try {
+              schedule(publish);
+              deferred = true;
+              cleanupTimer = setTimeout(() => {
+                if (builds.get(indexKey) === build) builds.delete(indexKey);
+              }, 10000);
+              cleanupTimer.unref();
+            } catch {
+              await publish();
+            }
+          } else await publish();
         }
         return accounts;
-      })();
-      builds.set(indexKey, build);
-    }
+      } catch (error) {
+        await release().catch(() => redisFailed(client));
+        throw error;
+      }
+    })();
+    builds.set(indexKey, build);
     try {
-      return matches(await build, input);
+      return matches(structuredClone(await build), input);
     } finally {
-      if (builds.get(indexKey) === build) builds.delete(indexKey);
+      if (!deferred && builds.get(indexKey) === build) builds.delete(indexKey);
     }
   };
 }

@@ -1,4 +1,5 @@
 import "server-only";
+import { cacheMetric, measureCache } from "@/lib/cache-metrics";
 
 const CDN = "https://ddragon.leagueoflegends.com";
 const DAY_SECONDS = 86_400;
@@ -92,8 +93,15 @@ async function fetchCatalog(
 
 async function loadCatalog(patch: string): Promise<Catalog> {
   const cached = catalogs.get(patch);
-  if (cached?.pending) return cached.pending;
-  if (cached?.value && cached.expiresAt > Date.now()) return cached.value;
+  if (cached?.pending) {
+    cacheMetric("asset_catalog", 0, "coalesced");
+    return cached.pending;
+  }
+  if (cached?.value && cached.expiresAt > Date.now()) {
+    cacheMetric("asset_catalog", 0, "hit");
+    return cached.value;
+  }
+  cacheMetric("asset_catalog", 0, "miss");
   catalogs.delete(patch);
   if (catalogs.size >= MAX_CATALOGS) {
     const oldest = [...catalogs].find(([, entry]) => !entry.pending);
@@ -143,7 +151,9 @@ export async function resolveGameAssets(
       ? "latest"
       : /^(\d{1,3}\.\d{1,3})(?:\.\d+){0,2}$/.exec(gameVersion)?.[1];
   if (!patch) return emptyCatalog();
-  const catalog = await loadCatalog(patch);
+  const catalog = await measureCache("asset_lookup_ms", () =>
+    loadCatalog(patch),
+  );
   const result = emptyCatalog();
   for (const champion of champions) {
     const value = catalog.champions.get(champion.toLowerCase());

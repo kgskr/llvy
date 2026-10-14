@@ -1,5 +1,7 @@
 import "server-only";
 
+import { measureCache } from "@/lib/cache-metrics";
+import { withCacheRequest } from "@/lib/cache-request";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { cache } from "react";
 import { cookies } from "next/headers";
@@ -15,7 +17,9 @@ export async function getSession() {
   const token = (await cookies()).get(SESSION_COOKIE)?.value;
   const session = await readSessionToken(token);
   if (!session) return null;
-  const actor = await findSessionActor(hashReference(session.reference));
+  const actor = await measureCache("auth_ms", () =>
+    findSessionActor(hashReference(session.reference)),
+  );
   return actor ? { ...actor, issuedAt: session.issuedAt, token: token! } : null;
 }
 
@@ -25,7 +29,7 @@ const readScope = new AsyncLocalStorage<{
 
 /** Opt-in scope for one read handler; React cache alone does not cover routes. */
 export function withReadSession<T>(read: () => T): T {
-  return readScope.run({}, read);
+  return readScope.run({}, () => withCacheRequest(read));
 }
 
 /** One DB snapshot per render/read request, never shared across requests. */

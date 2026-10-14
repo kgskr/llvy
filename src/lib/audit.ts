@@ -6,6 +6,7 @@ import { db } from "@/db";
 import { auditLogs } from "@/db/schema";
 import type { Actor, AuditActorSnapshot } from "@/lib/auth";
 import { lockActorAuthority } from "@/lib/authority";
+import { bumpCacheRevisions, type CacheScope } from "@/lib/cache-revisions";
 import { invalidateQueryCache } from "@/lib/query-cache";
 
 export type DbTransaction = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -99,13 +100,16 @@ export async function lockActor(
 
 export async function withActorTransaction<T>(
   actor: Actor,
-  work: (tx: DbTransaction) => Promise<T>,
+  work: (tx: DbTransaction, changes: Set<CacheScope>) => Promise<T>,
 ): Promise<T> {
+  const changes = new Set<CacheScope>();
   const result = await db.transaction(async (tx) => {
     await lockActor(tx, actor);
-    return work(tx);
+    const result = await work(tx, changes);
+    await bumpCacheRevisions(tx, changes);
+    return result;
   });
-  if (result !== false) await invalidateQueryCache();
+  if (changes.size) await invalidateQueryCache();
   return result;
 }
 

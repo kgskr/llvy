@@ -44,6 +44,8 @@ npx vitest run src/lib/champions.test.ts
 Docker, Podman 등 사용 가능한 도구로 테스트용 PostgreSQL 17과 Redis 7 컨테이너를
 준비합니다. 특정 컨테이너 도구를 요구하지 않습니다. PostgreSQL에서는 여러 연결 사이의
 잠금 경합과 검색 쿼리를, Redis에서는 실제 명령·TTL·캐시 무효화와 자동완성을 검증합니다.
+캐시 테스트는 하루 TTL 경계, revision과 업무 변경의 원자적 rollback,
+독립 Node 프로세스 간 인덱스 게시 권한·프로세스 종료 복구까지 포함합니다.
 
 컨테이너 포트는 `127.0.0.1`에 연결하고 PostgreSQL DB 이름은 `llvy_auth_test`로 지정합니다.
 테스트가 데이터를 초기화하므로 개발·운영 데이터와 분리된 폐기 가능한 인스턴스를 사용하세요.
@@ -61,6 +63,10 @@ npm run test:redis
 
 같은 환경변수를 설정한 상태에서 `npm run check`를 실행하면 전체 검사에도 포함됩니다.
 전용 테스트 명령은 연결 설정이 없으면 실패합니다. 테스트가 끝나면 컨테이너를 정리하세요.
+
+고정된 2분 간격 전적 재방문 workload의 로컬 비교는 `LLVY_CACHE_BENCHMARK=1`을
+추가해 `npm run test:redis`로 실행합니다. 실제 Redis와 PGlite를 사용하며,
+운영 네트워크·인증 제공자·에셋 카탈로그 지연을 재현하지 않습니다.
 
 ## 실제 리플레이 테스트
 

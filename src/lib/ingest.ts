@@ -1,7 +1,8 @@
 import "server-only";
+import { bumpCacheRevisions, type CacheScope } from "@/lib/cache-revisions";
 import { invalidateQueryCache } from "@/lib/query-cache";
 
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { setTimeout as delay } from "node:timers/promises";
 
 import { and, eq, isNull, sql } from "drizzle-orm";
@@ -152,13 +153,24 @@ export async function ingestReplay(input: {
       }
 
       const gameId = inserted[0].id;
+      const changes = new Set<CacheScope>([
+        "game-list",
+        `game:${gameId}`,
+        "history",
+        "riot-eligibility",
+      ]);
 
       // Resolve accounts sequentially on the transaction connection. Repeated
       // identities indicate a corrupt replay; never silently drop participants.
       const seen = new Set<string>();
       const participantRows: (typeof gameParticipants.$inferInsert)[] = [];
       for (const p of participants) {
-        const accountId = await findOrCreateAccount(tx, p, nameObservedAt);
+        const accountId = await findOrCreateAccount(
+          tx,
+          p,
+          nameObservedAt,
+          changes,
+        );
         if (seen.has(accountId)) {
           throw new RoflParseError(
             "Unsupported replay: multiple participants resolve to the same Riot account.",
@@ -184,6 +196,7 @@ export async function ingestReplay(input: {
       if (input.actor)
         await auditResult(tx, input.actor, input.uploadId, gameId, false);
 
+      await bumpCacheRevisions(tx, changes);
       return { gameId, duplicate: false };
     }),
   );
@@ -265,6 +278,7 @@ async function findOrCreateAccount(
   tx: Tx,
   p: ParsedParticipant,
   nameObservedAt: Date | null,
+  changes: Set<CacheScope>,
 ): Promise<string> {
   const sameName = and(
     eq(riotAccounts.gameName, p.riotGameName),
@@ -273,10 +287,15 @@ async function findOrCreateAccount(
 
   if (p.puuid) {
     const known = await tx
-      .select({ id: riotAccounts.id })
+      .select({
+        id: riotAccounts.id,
+        gameName: riotAccounts.gameName,
+        tagLine: riotAccounts.tagLine,
+      })
       .from(riotAccounts)
       .where(eq(riotAccounts.puuid, p.puuid))
-      .limit(1);
+      .limit(1)
+      .for("update");
     if (known.length === 0) {
       const namesakes = await tx
         .select({ puuid: riotAccounts.puuid, memberId: riotAccounts.memberId })
@@ -337,7 +356,17 @@ async function findOrCreateAccount(
           nameObservedAt: sql`greatest(${riotAccounts.nameObservedAt}, excluded.name_observed_at)`,
         },
       })
-      .returning({ id: riotAccounts.id });
+      .returning({
+        id: riotAccounts.id,
+        gameName: riotAccounts.gameName,
+        tagLine: riotAccounts.tagLine,
+      });
+    if (
+      !known[0] ||
+      known[0].gameName !== rows[0].gameName ||
+      known[0].tagLine !== rows[0].tagLine
+    )
+      changes.add("accounts");
     return rows[0].id;
   }
 
@@ -358,9 +387,13 @@ async function findOrCreateAccount(
     return candidates[0].id;
   }
 
+  // Keep identity resolution atomic. A generated primary key lets RETURNING
+  // distinguish a new row from a timestamp-only conflict without another read.
+  const proposedId = randomUUID();
   const rows = await tx
     .insert(riotAccounts)
     .values({
+      id: proposedId,
       gameName: p.riotGameName,
       tagLine: p.riotTagLine,
       puuid: null,
@@ -369,11 +402,11 @@ async function findOrCreateAccount(
     .onConflictDoUpdate({
       target: [riotAccounts.gameName, riotAccounts.tagLine],
       targetWhere: sql`${riotAccounts.puuid} is null`,
-      // Retain the newest observation while RETURNING the existing identity.
       set: {
         nameObservedAt: sql`greatest(${riotAccounts.nameObservedAt}, excluded.name_observed_at)`,
       },
     })
     .returning({ id: riotAccounts.id });
+  if (rows[0].id === proposedId) changes.add("accounts");
   return rows[0].id;
 }

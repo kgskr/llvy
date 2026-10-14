@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import {
   afterAll,
   afterEach,
@@ -13,7 +13,13 @@ import {
   vi,
 } from "vitest";
 
-import { gameParticipants, games, members, riotAccounts } from "@/db/schema";
+import {
+  cacheRevisions,
+  gameParticipants,
+  games,
+  members,
+  riotAccounts,
+} from "@/db/schema";
 import {
   client,
   db,
@@ -703,6 +709,57 @@ describe("member identities and retroactive account links", () => {
       memberId: null,
       memberName: null,
     });
+  });
+
+  it("does not invalidate displayed accounts when an ambiguous legacy upsert only advances observation time", async () => {
+    await db.insert(riotAccounts).values([
+      { gameName: "Shared Riot ID", tagLine: "KR1", puuid: "stable-identity" },
+      { gameName: "Shared Riot ID", tagLine: "KR1", puuid: null },
+    ]);
+    const revision = async () =>
+      (
+        await db
+          .select()
+          .from(cacheRevisions)
+          .where(eq(cacheRevisions.scope, "accounts"))
+      )[0].revision;
+    const display = () =>
+      db
+        .select({
+          id: riotAccounts.id,
+          gameName: riotAccounts.gameName,
+          tagLine: riotAccounts.tagLine,
+          memberId: riotAccounts.memberId,
+        })
+        .from(riotAccounts)
+        .orderBy(riotAccounts.id);
+    const before = await revision();
+    const accounts = await display();
+    await ingest(
+      replayBytes({
+        players: [
+          replayPlayer({ RIOT_ID_GAME_NAME: "Shared Riot ID", PUUID: null }),
+        ],
+      }),
+    );
+    expect(await display()).toEqual(accounts);
+    expect(await revision()).toBe(before);
+    const [legacy] = await db
+      .select()
+      .from(riotAccounts)
+      .where(isNull(riotAccounts.puuid));
+    expect(legacy.nameObservedAt).toEqual(playedAtInstant);
+    await ingest(
+      replayBytes({
+        players: [
+          replayPlayer({
+            RIOT_ID_GAME_NAME: "New legacy identity",
+            PUUID: null,
+          }),
+        ],
+      }),
+    );
+    expect(await revision()).toBe(before + BigInt(1));
   });
 
   it("includes members without accounts and reports missing mutation targets", async () => {

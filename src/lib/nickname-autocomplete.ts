@@ -14,6 +14,7 @@ export type { NicknameSuggestion } from "@/lib/search-contract";
 
 export const queryNicknameAutocomplete = createAutocompleteIndex({
   namespace: "autocomplete:v1",
+  scopes: ["accounts", "riot-eligibility"],
   indexedName: nicknameIndexKey,
   project: projectNicknameSuggestion,
 });

@@ -17,6 +17,19 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
+export const cachePolicy = pgTable("cache_policy", {
+  id: text("id").primaryKey(),
+  enabled: boolean("enabled").notNull().default(false),
+  epoch: uuid("epoch").notNull().defaultRandom(),
+});
+
+export const cacheRevisions = pgTable("cache_revisions", {
+  scope: text("scope").primaryKey(),
+  revision: bigint("revision", { mode: "bigint" })
+    .notNull()
+    .default(sql`0`),
+});
+
 /**
  * Club members. The UUID is the member's stable primary identity; it must not
  * change when the name is edited or accounts are (un)linked.

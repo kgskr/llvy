@@ -10,6 +10,8 @@ import {
   vi,
 } from "vitest";
 import {
+  cachePolicy,
+  cacheRevisions,
   authAccounts,
   authSessions,
   gameParticipants,
@@ -88,6 +90,13 @@ import {
 import { disconnectRedis, getRedisConnection } from "./redis";
 import type Redis from "ioredis";
 import { createAutocompleteIndex } from "./autocomplete-index";
+import { readCacheRevision, revisionKey } from "./cache-revisions";
+import { prepareCache } from "./cache-context";
+import { withCacheLifecycle } from "./cache-lifecycle";
+import { withCacheRequest } from "./cache-request";
+import { createPendingUpload } from "./pending-upload-store";
+import { getMemberHistory } from "./member-history";
+import { getReadSession } from "./session";
 import {
   memberIndexKey,
   projectSearchSuggestion,
@@ -114,6 +123,7 @@ describe.skipIf(!testUrl)(
     beforeEach(async () => {
       disconnectRedis();
       await resetTestDatabase();
+      await db.update(cachePolicy).set({ enabled: true });
       vi.stubEnv("REDIS_URL", testUrl!);
       vi.stubEnv("REDIS_KEY_PREFIX", `llvy-test:${randomUUID()}`);
       vi.stubEnv(
@@ -154,6 +164,388 @@ describe.skipIf(!testUrl)(
     async function dataKeys() {
       return (await keys()).filter((key) => !key.endsWith(":generation"));
     }
+
+    it("keeps the member snapshot for exactly one day without sliding expiry", async () => {
+      const context = await prepareCache(["members", "accounts"]);
+      expect(context).not.toBeNull();
+      const now = Date.now();
+      const clock = vi.spyOn(Date, "now").mockReturnValue(now);
+      const load = vi.fn().mockResolvedValue([{ name: "하루" }]);
+      const identity = {
+        query: "day-policy",
+        role: "viewer" as const,
+        policy: "members" as const,
+      };
+      await cachedQuery(identity, load, context);
+      const key = (await dataKeys())[0];
+      expect(await redis.ttl(key)).toBeGreaterThanOrEqual(86399);
+      expect(await redis.ttl(key)).toBeLessThanOrEqual(86400);
+      const original = await redis.get(key);
+      for (const elapsed of [120000, 600000, 86400000 - 1]) {
+        clock.mockReturnValue(now + elapsed);
+        expect(
+          await cachedQuery(
+            identity,
+            load,
+            await prepareCache(["members", "accounts"]),
+          ),
+        ).toEqual([{ name: "하루" }]);
+        expect(await redis.get(key)).toBe(original);
+      }
+      expect(load).toHaveBeenCalledOnce();
+      clock.mockReturnValue(now + 86400000);
+      await cachedQuery(
+        identity,
+        load,
+        await prepareCache(["members", "accounts"]),
+      );
+      expect(load).toHaveBeenCalledTimes(2);
+    });
+
+    it("coalesces ordinary fills, isolates objects, and retries a failed loader", async () => {
+      const context = await prepareCache(["members"]);
+      let finish!: (value: { names: string[] }) => void;
+      const load = vi.fn(
+        () =>
+          new Promise<{ names: string[] }>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const identity = { query: "singleflight", role: "viewer" as const };
+      const first = cachedQuery(identity, load, context);
+      await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
+      const second = cachedQuery(identity, load, context);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      finish({ names: ["원본"] });
+      const [a, b] = await Promise.all([first, second]);
+      a.names.push("변경");
+      expect(b.names).toEqual(["원본"]);
+      expect(load).toHaveBeenCalledOnce();
+      const failed = vi.fn().mockRejectedValue(new Error("DB unavailable"));
+      await expect(
+        cachedQuery({ ...identity, query: "retry" }, failed, context),
+      ).rejects.toThrow("DB unavailable");
+      expect(failed).toHaveBeenCalledOnce();
+      expect(
+        await cachedQuery(
+          { ...identity, query: "retry" },
+          async () => "recovered",
+          context,
+        ),
+      ).toBe("recovered");
+    });
+
+    it("rejects disabled or missing metadata and preserves bigint revisions and epoch isolation", async () => {
+      const { eq } = await import("drizzle-orm");
+      await db
+        .update(cacheRevisions)
+        .set({ revision: BigInt("9007199254740993") })
+        .where(eq(cacheRevisions.scope, "members"));
+      const first = await readCacheRevision(["members"]);
+      expect(first?.values.members).toBe("9007199254740993");
+      await createMember("새 모임원", null);
+      const second = await readCacheRevision(["members"]);
+      expect(second?.values.members).toBe("9007199254740994");
+      expect(revisionKey(first!, ["members"])).not.toBe(
+        revisionKey(second!, ["members"]),
+      );
+      await db.update(cachePolicy).set({ epoch: randomUUID() });
+      expect(
+        revisionKey((await readCacheRevision(["members"]))!, ["members"]),
+      ).not.toBe(revisionKey(second!, ["members"]));
+      await db.update(cachePolicy).set({ enabled: false });
+      expect(await prepareCache(["members"])).toBeNull();
+      await db.update(cachePolicy).set({ enabled: true });
+      await db
+        .delete(cacheRevisions)
+        .where(eq(cacheRevisions.scope, "members"));
+      expect(await prepareCache(["members"])).toBeNull();
+      await db
+        .insert(cacheRevisions)
+        .values({ scope: "members", revision: BigInt(0) });
+      disconnectRedis();
+      vi.stubEnv("REDIS_URL", "");
+      const execute = vi.spyOn(db, "execute");
+      expect(await prepareCache(["members"])).toBeNull();
+      expect(execute).not.toHaveBeenCalled();
+    });
+
+    it("does not advance revisions on rollback or no-op and keeps comment changes out of search", async () => {
+      const fixture = await seed();
+      const scopes = [
+        "members",
+        "accounts",
+        "history",
+        "game-list",
+        "riot-eligibility",
+        `game:${fixture.game.id}`,
+      ] as const;
+      const before = await readCacheRevision(scopes);
+      await updateMember(
+        fixture.member.id,
+        fixture.member.name,
+        fixture.member.birthYear,
+      );
+      await linkAccount(fixture.account.id, fixture.member.id);
+      await setGameComment(fixture.game.id, "");
+      await setGameExcluded(fixture.game.id, false);
+      await setGamePlayedAt(fixture.game.id, null);
+      expect(await readCacheRevision(scopes)).toEqual(before);
+      await expect(
+        withActorTransaction(ownerActor, async (tx, changes) => {
+          changes.add("members");
+          await tx.insert(members).values({ name: "롤백" });
+          throw new Error("rollback");
+        }),
+      ).rejects.toThrow("rollback");
+      expect(await readCacheRevision(scopes)).toEqual(before);
+      await autocompleteSearch("김");
+      await setGameComment(fixture.game.id, "댓글 변경");
+      const after = await readCacheRevision(scopes);
+      for (const scope of [
+        "members",
+        "accounts",
+        "history",
+        "riot-eligibility",
+      ] as const)
+        expect(after?.values[scope]).toBe(before?.values[scope]);
+      const select = vi.spyOn(db, "select");
+      await autocompleteSearch("김");
+      expect(businessSelectCount(select.mock.calls)).toBe(0);
+      const pipelines = vi.spyOn(redis, "pipeline");
+      const execute = vi.spyOn(db, "execute");
+      await autocompleteSearch("김");
+      expect(pipelines).toHaveBeenCalledOnce();
+      expect(execute).toHaveBeenCalledOnce();
+    });
+
+    it("reuses history aggregates on the next page and bounds admitted pages", async () => {
+      const { member } = await seed();
+      const initial = await getMemberHistoryReadModel(member.id, 1, 0);
+      const query = vi.spyOn(postgres, "query");
+      const next = await getMemberHistoryReadModel(member.id, 1, 1);
+      expect(next.history?.stats).toEqual(initial.history?.stats);
+      expect(next.history?.games).toEqual([]);
+      expect(query.mock.calls.some(([sql]) => sql.includes("avg("))).toBe(
+        false,
+      );
+      const before = (await dataKeys()).filter((key) =>
+        key.includes(":member-history-v3:"),
+      );
+      await getMemberHistoryReadModel(member.id, 1, 20);
+      expect(
+        (await dataKeys()).filter((key) => key.includes(":member-history-v3:")),
+      ).toEqual(before);
+      await getGameListReadModel(10, "999999");
+      const listKeys = (await dataKeys()).filter((key) =>
+        key.includes(":game-list-v3:"),
+      );
+      await getGameListReadModel(10, "888888");
+      expect(
+        (await dataKeys()).filter((key) => key.includes(":game-list-v3:")),
+      ).toEqual(listKeys);
+    });
+
+    it("returns index data before publication and rejects an expired owner's late publication", async () => {
+      const queued: (() => Promise<void>)[] = [];
+      const old = { id: randomUUID(), gameName: "Ancient", tagLine: "KR1" };
+      await withCacheLifecycle(
+        (work) => {
+          queued.push(work);
+        },
+        () => queryNicknameAutocomplete("a", async () => [old]),
+      );
+      expect(queued).toHaveLength(1);
+      expect((await keys()).some((key) => key.endsWith(":ready"))).toBe(false);
+      const lease = (await keys()).find((key) => key.endsWith(":lease"))!;
+      await redis.set(lease, "new-owner", "PX", 10000);
+      await queued[0]();
+      expect(await redis.get(lease)).toBe("new-owner");
+      expect((await keys()).some((key) => key.endsWith(":ready"))).toBe(false);
+      await redis.del(lease);
+      const fresh = { ...old, gameName: "Actual" };
+      expect(await queryNicknameAutocomplete("a", async () => [fresh])).toEqual(
+        [fresh],
+      );
+      const live = (await keys()).filter(
+        (key) =>
+          /:(ready|names|accounts)$/.test(key) && !key.includes(":building:"),
+      );
+      const expiries = await Promise.all(
+        live.map((key) => redis.pexpiretime(key)),
+      );
+      expect(new Set(expiries).size).toBe(1);
+    });
+
+    it("shares identical revision reads only within one request", async () => {
+      const execute = vi.spyOn(db, "execute");
+      await withCacheRequest(async () => {
+        const [a, b] = await Promise.all([
+          prepareCache(["members", "accounts"]),
+          prepareCache(["accounts", "members"]),
+        ]);
+        expect(a).toBe(b);
+      });
+      expect(execute).toHaveBeenCalledOnce();
+      await withCacheRequest(() => prepareCache(["members", "accounts"]));
+      expect(execute).toHaveBeenCalledTimes(2);
+    });
+
+    it("preserves caches for upload reservation and duplicate ingestion, and never resurrects pre-commit fills", async () => {
+      const scopes = [
+        "members",
+        "accounts",
+        "history",
+        "game-list",
+        "riot-eligibility",
+      ] as const;
+      const before = await readCacheRevision(scopes);
+      await createPendingUpload("fixture", ownerActor);
+      expect(await readCacheRevision(scopes)).toEqual(before);
+      const input = {
+        bytes: replayBytes(),
+        blobUrl: "https://fixture.invalid/reservation.rofl",
+        actor: ownerActor,
+        originalFilename: "reservation.rofl",
+        lastModified: null,
+      };
+      await ingestReplay(input);
+      const committed = await readCacheRevision(scopes);
+      expect(committed).not.toEqual(before);
+      expect((await ingestReplay(input)).duplicate).toBe(true);
+      expect(await readCacheRevision(scopes)).toEqual(committed);
+      let finish!: (value: string) => void;
+      const load = vi.fn(
+        () =>
+          new Promise<string>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const identity = { query: "revision-race", role: "viewer" as const };
+      const oldContext = await prepareCache(["members"]);
+      const pending = cachedQuery(identity, load, oldContext);
+      await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
+      await createMember("커밋 이후", null);
+      const currentContext = await prepareCache(["members"]);
+      finish("old");
+      expect(await pending).toBe("old");
+      expect(
+        await cachedQuery(identity, async () => "current", currentContext),
+      ).toBe("current");
+    });
+
+    it("uses committed revisions after Redis recovers with stale entries intact", async () => {
+      const fixture = await seed();
+      await getMembersReadModel();
+      const oldKeys = await dataKeys();
+      vi.spyOn(console, "warn").mockImplementation(() => {});
+      const set = vi
+        .spyOn(redis, "set")
+        .mockRejectedValueOnce(new Error("write blocked"));
+      expect(await updateMember(fixture.member.id, "현재 모임원", 1990)).toBe(
+        true,
+      );
+      set.mockRestore();
+      disconnectRedis();
+      redis = (await getRedisConnection())!.client;
+      expect((await getMembersReadModel()).members[0].name).toBe("현재 모임원");
+      expect(await redis.exists(oldKeys[0])).toBe(1);
+    });
+
+    it("recovers when an after callback is never invoked in a surviving process", async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+      try {
+        const load = vi
+          .fn()
+          .mockResolvedValue([
+            { id: randomUUID(), gameName: "Absent callback", tagLine: "KR1" },
+          ]);
+        await withCacheLifecycle(
+          () => {},
+          () => queryNicknameAutocomplete("a", load),
+        );
+        const lease = (await keys()).find((key) => key.endsWith(":lease"))!;
+        await redis.del(lease);
+        await vi.advanceTimersByTimeAsync(10001);
+        await queryNicknameAutocomplete("a", load);
+        expect(load).toHaveBeenCalledTimes(2);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it.skipIf(process.env.LLVY_CACHE_BENCHMARK !== "1")(
+      "records the fixed two-minute revisit workload separately from production timing",
+      async () => {
+        const { member } = await seed();
+        const base = Date.now();
+        const clock = vi.spyOn(Date, "now").mockReturnValue(base);
+        const info = async () =>
+          Number(
+            (await redis.info("stats")).match(
+              /total_commands_processed:(\d+)/,
+            )![1],
+          );
+        const run = async (mode: "legacy" | "revision") => {
+          const durations: number[] = [];
+          const query = vi.spyOn(postgres, "query");
+          const commands = await info();
+          for (let i = 0; i < 30; i++) {
+            clock.mockReturnValue(base + i * 120000);
+            const start = performance.now();
+            if (mode === "legacy") {
+              await getReadSession();
+              await cachedQuery(
+                {
+                  query: "benchmark-history-legacy",
+                  role: "owner",
+                  args: [member.id, 25, 0],
+                },
+                async () => {
+                  return getMemberHistory(member.id);
+                },
+              );
+            } else {
+              await getMemberHistoryReadModel(member.id);
+            }
+            durations.push(performance.now() - start);
+          }
+          const heavyLoads = query.mock.calls.filter(([sql]) =>
+            sql.includes('from "member_games"'),
+          ).length;
+          const totalQueries = query.mock.calls.length;
+          query.mockRestore();
+          durations.sort((a, b) => a - b);
+          return {
+            samples: durations.length,
+            p50: durations[14],
+            p95: durations[28],
+            heavyLoads,
+            totalQueries,
+            commands: (await info()) - commands,
+          };
+        };
+        const legacy = await run("legacy");
+        const revision = await run("revision");
+        const allKeys = await dataKeys();
+        const memory = (
+          await Promise.all(allKeys.map((key) => redis.memory("USAGE", key)))
+        ).reduce<number>((sum, bytes) => sum + Number(bytes), 0);
+        console.info(
+          JSON.stringify({
+            workload:
+              "30 visits, two-minute interval, one history page, PGlite + Redis 7, no catalog/network",
+            legacy,
+            revision,
+            keys: allKeys.length,
+            bytes: memory,
+          }),
+        );
+        expect(revision.heavyLoads).toBeLessThanOrEqual(
+          legacy.heavyLoads * 0.2,
+        );
+      },
+    );
 
     it.each(["readiness", "command"])(
       "falls back promptly when real Redis %s replies stop",
@@ -233,13 +625,16 @@ describe.skipIf(!testUrl)(
         },
       ];
       expect(await autocompleteSearch("김")).toEqual(expected);
-      const generation = await redis.get(`${prefix}:generation`);
-      const memberKey = `${prefix}:${generation}:member-autocomplete:v1`;
-      const accountKey = `${prefix}:${generation}:autocomplete:v1`;
+      const memberKey = (await keys())
+        .find((key) => key.endsWith(":member-autocomplete:v1:ready"))!
+        .replace(/:ready$/, "");
+      const accountKey = (await keys())
+        .find((key) => key.endsWith(":autocomplete:v1:ready"))!
+        .replace(/:ready$/, "");
       for (const key of [memberKey, accountKey]) {
         for (const suffix of ["names", "accounts", "ready"])
           expect(await redis.ttl(`${key}:${suffix}`)).toBeGreaterThanOrEqual(
-            58,
+            19438,
           );
       }
       const stored = await redis.hgetall(`${memberKey}:accounts`);
@@ -292,7 +687,8 @@ describe.skipIf(!testUrl)(
       expect((await autocompleteSearch("이변경"))[0]).toMatchObject({
         accounts: [{ gameName: "김계정", tagLine: "KR1" }],
       });
-      await withActorTransaction(ownerActor, async (tx) => {
+      await withActorTransaction(ownerActor, async (tx, changes) => {
+        changes.add("accounts");
         const { eq } = await import("drizzle-orm");
         await tx
           .update(riotAccounts)
@@ -512,7 +908,7 @@ describe.skipIf(!testUrl)(
         query.mockRestore();
       }
       const key = (await dataKeys()).find((key) =>
-        key.includes(":game-list-v2:"),
+        key.includes(":game-list-v3:"),
       )!;
       const stored = (await redis.get(key))!;
       expect(stored).not.toMatch(/birthYear|birth_year|puuid|rawStats|blobUrl/);
@@ -562,7 +958,7 @@ describe.skipIf(!testUrl)(
         query.mockRestore();
       }
       const key = (await dataKeys()).find((key) =>
-        key.includes(":member-history-v2:"),
+        key.includes(":member-history-v3:"),
       )!;
       const stored = (await redis.get(key))!;
       expect(stored).not.toMatch(/rawStats|PUUID|private-roster/);
@@ -659,7 +1055,8 @@ describe.skipIf(!testUrl)(
         key.includes(":viewer:"),
       )) {
         const stored = (await redis.get(key))!;
-        expect(stored).toContain(member.name);
+        if (key.includes(":members:") || key.includes(":game-detail-v2:"))
+          expect(stored).toContain(member.name);
         expect(stored).not.toContain("김**원");
         expect(stored).not.toContain("birthYear");
       }
@@ -924,8 +1321,8 @@ describe.skipIf(!testUrl)(
       );
       expect(indexKeys).toHaveLength(3);
       for (const key of indexKeys) {
-        expect(await redis.ttl(key)).toBeGreaterThanOrEqual(58);
-        expect(await redis.ttl(key)).toBeLessThanOrEqual(60);
+        expect(await redis.ttl(key)).toBeGreaterThanOrEqual(19438);
+        expect(await redis.ttl(key)).toBeLessThanOrEqual(23760);
         if (key.endsWith(":accounts")) {
           const payload = JSON.stringify(await redis.hgetall(key));
           expect(payload).not.toContain("김모임원");
@@ -1003,7 +1400,8 @@ describe.skipIf(!testUrl)(
     it("refreshes renamed accounts and new replay accounts after generation invalidation", async () => {
       const fixture = await seed("old nickname");
       expect(await autocompleteStoredNicknames("old")).toHaveLength(1);
-      await withActorTransaction(ownerActor, async (tx) => {
+      await withActorTransaction(ownerActor, async (tx, changes) => {
+        changes.add("accounts");
         const { eq } = await import("drizzle-orm");
         await tx
           .update(riotAccounts)
@@ -1091,7 +1489,9 @@ describe.skipIf(!testUrl)(
       const first = queryNicknameAutocomplete("a", load);
       await began;
       expect(
-        (await keys()).filter((key) => key.includes(":autocomplete:")),
+        (await keys()).filter(
+          (key) => key.includes(":autocomplete:") && !key.endsWith(":lease"),
+        ),
       ).toEqual([]);
       const second = queryNicknameAutocomplete("ab", load);
       // Let the second request reach the same in-flight build.
@@ -1123,8 +1523,13 @@ describe.skipIf(!testUrl)(
         return waiting;
       });
       await began;
-      const previous = await redis.get(`${prefix}:generation`);
-      await invalidateQueryCache();
+      const previous = await readCacheRevision([
+        "accounts",
+        "riot-eligibility",
+      ]);
+      await withActorTransaction(ownerActor, async (_tx, changes) => {
+        changes.add("accounts");
+      });
       finish([{ id: randomUUID(), gameName: "Ancient", tagLine: "KR1" }]);
       expect((await first)[0].gameName).toBe("Ancient");
       const load = vi
@@ -1139,7 +1544,9 @@ describe.skipIf(!testUrl)(
         "Actual",
       );
       expect(load).toHaveBeenCalledTimes(1);
-      expect(await redis.get(`${prefix}:generation`)).not.toBe(previous);
+      expect(
+        await readCacheRevision(["accounts", "riot-eligibility"]),
+      ).not.toEqual(previous);
     });
 
     it("does not publish a half-built snapshot when a temporary key disappears", async () => {
@@ -1147,7 +1554,7 @@ describe.skipIf(!testUrl)(
       const original = redis.eval.bind(redis);
       vi.spyOn(console, "warn").mockImplementation(() => {});
       vi.spyOn(redis, "eval").mockImplementation(async (...args) => {
-        if (args[1] === 5) await redis.del(String(args[2]));
+        if (args[1] === 6) await redis.del(String(args[2]));
         return original(...args);
       });
       const load = vi.fn().mockResolvedValue([fixture]);
@@ -1268,7 +1675,14 @@ describe.skipIf(!testUrl)(
         ["Cafe\u0301", "KR1"],
       ]) {
         const fixture = await seed(name, false, tag);
-        await invalidateQueryCache();
+        await withActorTransaction(ownerActor, async (_tx, changes) => {
+          for (const scope of [
+            "members",
+            "accounts",
+            "riot-eligibility",
+          ] as const)
+            changes.add(scope);
+        });
         const prefixInput = name.normalize("NFC").toLowerCase();
         const suggestions = await autocompleteStoredNicknames(prefixInput);
         expect(

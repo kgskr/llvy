@@ -1,4 +1,6 @@
-import { NextResponse } from "next/server";
+import { after, NextResponse } from "next/server";
+import { withCacheLifecycle } from "@/lib/cache-lifecycle";
+import { withCacheMetrics, cacheServerTiming } from "@/lib/cache-metrics";
 import {
   autocompleteSearch,
   autocompleteStoredNicknames,
@@ -15,7 +17,16 @@ export const dynamic = "force-dynamic";
 const headers = { "Cache-Control": "private, no-store" };
 
 export function GET(request: Request) {
-  return withReadSession(() => autocompleteResponse(request));
+  return withCacheMetrics(() =>
+    withCacheLifecycle(after, () =>
+      withReadSession(async () => {
+        const response = await autocompleteResponse(request);
+        const timing = cacheServerTiming();
+        if (timing) response.headers.set("Server-Timing", timing);
+        return response;
+      }),
+    ),
+  );
 }
 
 async function autocompleteResponse(request: Request) {

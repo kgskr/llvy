@@ -14,13 +14,18 @@ export async function setGameExcluded(
 ): Promise<boolean> {
   const actor = await assertAdmin();
   if (!isUuid(id) || typeof excluded !== "boolean") return false;
-  return withActorTransaction(actor, async (tx) => {
+  return withActorTransaction(actor, async (tx, changes) => {
     const [before] = await tx
       .select({ excludedAt: games.excludedAt })
       .from(games)
       .where(eq(games.id, id))
       .for("update");
     if (!before) return false;
+    if (Boolean(before.excludedAt) === excluded) return true;
+    changes.add("game-list");
+    changes.add(`game:${id}`);
+    changes.add("history");
+    changes.add("riot-eligibility");
     const [after] = await tx
       .update(games)
       .set({
@@ -46,13 +51,17 @@ export async function setGamePlayedAt(
   const actor = await assertAdmin();
   if (!isUuid(id) || (playedAt !== null && !validateGameDateInput(playedAt).ok))
     return false;
-  return withActorTransaction(actor, async (tx) => {
+  return withActorTransaction(actor, async (tx, changes) => {
     const [before] = await tx
       .select({ playedAtOverride: games.playedAtOverride })
       .from(games)
       .where(eq(games.id, id))
       .for("update");
     if (!before) return false;
+    if (before.playedAtOverride === playedAt) return true;
+    changes.add("game-list");
+    changes.add(`game:${id}`);
+    changes.add("history");
     await tx
       .update(games)
       .set({ playedAtOverride: playedAt })
@@ -77,13 +86,16 @@ export async function setGameComment(
   const actor = await assertAdmin();
   const input = validateGameComment(value);
   if (!isUuid(id) || !input.ok) return false;
-  return withActorTransaction(actor, async (tx) => {
+  return withActorTransaction(actor, async (tx, changes) => {
     const [before] = await tx
       .select({ comment: games.comment })
       .from(games)
       .where(eq(games.id, id))
       .for("update");
     if (!before) return false;
+    if (before.comment === input.comment) return true;
+    changes.add("game-list");
+    changes.add(`game:${id}`);
     await tx
       .update(games)
       .set({ comment: input.comment })

@@ -79,20 +79,9 @@ export async function getMemberIdentity(memberId: string) {
   return member ?? null;
 }
 
-/**
- * Current account links determine the member's entire history. Group in SQL
- * before pagination so multiple linked accounts in one game count only once;
- * ambiguous participation never invents a champion, outcome or K/D/A.
- */
-export async function getMemberHistory(
-  memberId: string,
-  limit = 25,
-  offset = 0,
-): Promise<MemberHistory | null> {
-  const member = await getMemberIdentity(memberId);
-  if (!member) return null;
-
-  const memberGames = db.$with("member_games").as(
+/** Current account links determine history, grouped before pagination. */
+function memberGamesQuery(memberId: string) {
+  return db.$with("member_games").as(
     db
       .select({
         id: games.id,
@@ -135,111 +124,117 @@ export async function getMemberHistory(
       .where(and(eq(riotAccounts.memberId, memberId), isNull(games.excludedAt)))
       .groupBy(games.id),
   );
-
-  const [accounts, [stats], history, championStats, positionStats] =
-    await Promise.all([
-      db
-        .select({
-          id: riotAccounts.id,
-          gameName: riotAccounts.gameName,
-          tagLine: riotAccounts.tagLine,
-        })
-        .from(riotAccounts)
-        .where(eq(riotAccounts.memberId, memberId))
-        .orderBy(
-          asc(riotAccounts.gameName),
-          asc(riotAccounts.tagLine),
-          asc(riotAccounts.id),
-        ),
-      db
-        .with(memberGames)
-        .select({
-          totalGames: sql<number>`count(*)::int`,
-          wins: sql<number>`(count(*) filter (where ${memberGames.result} = 'win'))::int`,
-          losses: sql<number>`(count(*) filter (where ${memberGames.result} = 'loss'))::int`,
-          undecided: sql<number>`(count(*) filter (where ${memberGames.result} = 'unknown'))::int`,
-          winRate: sql<number | null>`(
+}
+export async function getMemberAccounts(memberId: string) {
+  return db
+    .select({
+      id: riotAccounts.id,
+      gameName: riotAccounts.gameName,
+      tagLine: riotAccounts.tagLine,
+    })
+    .from(riotAccounts)
+    .where(eq(riotAccounts.memberId, memberId))
+    .orderBy(
+      asc(riotAccounts.gameName),
+      asc(riotAccounts.tagLine),
+      asc(riotAccounts.id),
+    );
+}
+export async function getMemberHistoryAggregates(memberId: string) {
+  const memberGames = memberGamesQuery(memberId);
+  const [[stats], championStats, positionStats] = await Promise.all([
+    db
+      .with(memberGames)
+      .select({
+        totalGames: sql<number>`count(*)::int`,
+        wins: sql<number>`(count(*) filter (where ${memberGames.result} = 'win'))::int`,
+        losses: sql<number>`(count(*) filter (where ${memberGames.result} = 'loss'))::int`,
+        undecided: sql<number>`(count(*) filter (where ${memberGames.result} = 'unknown'))::int`,
+        winRate: sql<number | null>`(
           100.0 * count(*) filter (where ${memberGames.result} = 'win')
           / nullif(count(*) filter (where ${memberGames.result} in ('win', 'loss')), 0)
         )::float8`,
-          // PostgreSQL avg ignores NULL independently for each counter, including
-          // the NULLs deliberately produced for ambiguous participation above.
-          averageKills: sql<number | null>`avg(${memberGames.kills})::float8`,
-          averageDeaths: sql<number | null>`avg(${memberGames.deaths})::float8`,
-          averageAssists: sql<
-            number | null
-          >`avg(${memberGames.assists})::float8`,
-        })
-        .from(memberGames),
-      db
-        .with(memberGames)
-        .select({
-          id: memberGames.id,
-          playedAt: memberGames.playedAt,
-          playedAtSource: memberGames.playedAtSource,
-          durationMs: memberGames.durationMs,
-          gameVersion: memberGames.gameVersion,
-          champion: memberGames.champion,
-          position: memberGames.position,
-          kills: memberGames.kills,
-          deaths: memberGames.deaths,
-          assists: memberGames.assists,
-          result: memberGames.result,
-          ambiguous: memberGames.ambiguous,
-        })
-        .from(memberGames)
-        .orderBy(
-          desc(memberGames.playedAt),
-          desc(memberGames.uploadedAt),
-          desc(memberGames.id),
-        )
-        .limit(
-          Number.isSafeInteger(limit) && limit >= 0 ? Math.min(limit, 100) : 25,
-        )
-        .offset(Number.isSafeInteger(offset) && offset >= 0 ? offset : 0),
-      db
-        .with(memberGames)
-        .select({
-          champion: sql<string>`${memberGames.champion}`,
-          position: memberGames.position,
-          totalGames: sql<number>`count(*)::int`,
-          wins: sql<number>`(count(*) filter (where ${memberGames.result} = 'win'))::int`,
-          losses: sql<number>`(count(*) filter (where ${memberGames.result} = 'loss'))::int`,
-          undecided: sql<number>`(count(*) filter (where ${memberGames.result} = 'unknown'))::int`,
-          winRate: sql<number | null>`(
+        // PostgreSQL avg ignores NULL independently for each counter, including
+        // the NULLs deliberately produced for ambiguous participation above.
+        averageKills: sql<number | null>`avg(${memberGames.kills})::float8`,
+        averageDeaths: sql<number | null>`avg(${memberGames.deaths})::float8`,
+        averageAssists: sql<number | null>`avg(${memberGames.assists})::float8`,
+      })
+      .from(memberGames),
+    db
+      .with(memberGames)
+      .select({
+        champion: sql<string>`${memberGames.champion}`,
+        position: memberGames.position,
+        totalGames: sql<number>`count(*)::int`,
+        wins: sql<number>`(count(*) filter (where ${memberGames.result} = 'win'))::int`,
+        losses: sql<number>`(count(*) filter (where ${memberGames.result} = 'loss'))::int`,
+        undecided: sql<number>`(count(*) filter (where ${memberGames.result} = 'unknown'))::int`,
+        winRate: sql<number | null>`(
           100.0 * count(*) filter (where ${memberGames.result} = 'win')
           / nullif(count(*) filter (where ${memberGames.result} in ('win', 'loss')), 0)
         )::float8`,
-          averageKills: sql<number | null>`avg(${memberGames.kills})::float8`,
-          averageDeaths: sql<number | null>`avg(${memberGames.deaths})::float8`,
-          averageAssists: sql<
-            number | null
-          >`avg(${memberGames.assists})::float8`,
-        })
-        .from(memberGames)
-        .where(sql`${memberGames.champion} is not null`)
-        .groupBy(memberGames.champion, memberGames.position)
-        .orderBy(
-          desc(sql`count(*)`),
-          asc(memberGames.champion),
-          asc(memberGames.position),
-        ),
-      db
-        .with(memberGames)
-        .select({
-          position: memberGames.position,
-          totalGames: sql<number>`count(*)::int`,
-          winRate: sql<number | null>`(
+        averageKills: sql<number | null>`avg(${memberGames.kills})::float8`,
+        averageDeaths: sql<number | null>`avg(${memberGames.deaths})::float8`,
+        averageAssists: sql<number | null>`avg(${memberGames.assists})::float8`,
+      })
+      .from(memberGames)
+      .where(sql`${memberGames.champion} is not null`)
+      .groupBy(memberGames.champion, memberGames.position)
+      .orderBy(
+        desc(sql`count(*)`),
+        asc(memberGames.champion),
+        asc(memberGames.position),
+      ),
+    db
+      .with(memberGames)
+      .select({
+        position: memberGames.position,
+        totalGames: sql<number>`count(*)::int`,
+        winRate: sql<number | null>`(
           100.0 * count(*) filter (where ${memberGames.result} = 'win')
           / nullif(count(*) filter (where ${memberGames.result} in ('win', 'loss')), 0)
         )::float8`,
-        })
-        .from(memberGames)
-        .where(sql`not ${memberGames.ambiguous}`)
-        .groupBy(memberGames.position)
-        .orderBy(desc(sql`count(*)`), asc(memberGames.position)),
-    ]);
-
+      })
+      .from(memberGames)
+      .where(sql`not ${memberGames.ambiguous}`)
+      .groupBy(memberGames.position)
+      .orderBy(desc(sql`count(*)`), asc(memberGames.position)),
+  ]);
+  return { stats, championStats, positionStats };
+}
+export async function getMemberHistoryPage(
+  memberId: string,
+  limit = 25,
+  offset = 0,
+): Promise<MemberHistoryGame[]> {
+  const memberGames = memberGamesQuery(memberId);
+  const history = await db
+    .with(memberGames)
+    .select({
+      id: memberGames.id,
+      playedAt: memberGames.playedAt,
+      playedAtSource: memberGames.playedAtSource,
+      durationMs: memberGames.durationMs,
+      gameVersion: memberGames.gameVersion,
+      champion: memberGames.champion,
+      position: memberGames.position,
+      kills: memberGames.kills,
+      deaths: memberGames.deaths,
+      assists: memberGames.assists,
+      result: memberGames.result,
+      ambiguous: memberGames.ambiguous,
+    })
+    .from(memberGames)
+    .orderBy(
+      desc(memberGames.playedAt),
+      desc(memberGames.uploadedAt),
+      desc(memberGames.id),
+    )
+    .limit(
+      Number.isSafeInteger(limit) && limit >= 0 ? Math.min(limit, 100) : 25,
+    )
+    .offset(Number.isSafeInteger(offset) && offset >= 0 ? offset : 0);
   // Enrich only the paginated games, once. Never load whole raw_stats objects
   // or call getGameDetail for each row; even other players' loadouts stay in DB.
   const pageParticipants =
@@ -286,30 +281,38 @@ export async function getMemberHistory(
     byGame.set(participant.gameId, group);
   }
 
-  return {
-    member,
-    accounts,
-    stats,
-    games: history.map((game) => {
-      const participants = byGame.get(game.id) ?? [];
-      const own = participants.filter((participant) => participant.isMember);
-      const loadout =
-        !game.ambiguous && own.length === 1 ? own[0].loadout : null;
-      return {
-        ...game,
-        ...readParticipantLoadout(loadout),
-        participants: participants.map((participant) => ({
-          id: participant.id,
-          team: participant.team,
-          position: participant.position,
-          champion: participant.champion,
-          gameName: participant.gameName,
-          tagLine: participant.tagLine,
-          isMember: participant.isMember,
-        })),
-      };
-    }),
-    championStats,
-    positionStats,
-  };
+  return history.map((game) => {
+    const participants = byGame.get(game.id) ?? [];
+    const own = participants.filter((participant) => participant.isMember);
+    const loadout = !game.ambiguous && own.length === 1 ? own[0].loadout : null;
+    return {
+      ...game,
+      ...readParticipantLoadout(loadout),
+      participants: participants.map((participant) => ({
+        id: participant.id,
+        team: participant.team,
+        position: participant.position,
+        champion: participant.champion,
+        gameName: participant.gameName,
+        tagLine: participant.tagLine,
+        isMember: participant.isMember,
+      })),
+    };
+  });
+}
+
+/** Compatibility facade; the read model caches the independent pieces. */
+export async function getMemberHistory(
+  memberId: string,
+  limit = 25,
+  offset = 0,
+): Promise<MemberHistory | null> {
+  const member = await getMemberIdentity(memberId);
+  if (!member) return null;
+  const [accounts, aggregates, games] = await Promise.all([
+    getMemberAccounts(memberId),
+    getMemberHistoryAggregates(memberId),
+    getMemberHistoryPage(memberId, limit, offset),
+  ]);
+  return { member, accounts, ...aggregates, games };
 }

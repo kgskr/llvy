@@ -52,6 +52,13 @@ flowchart LR
 Redis가 연결되어 있으면 조회 결과와 이름·Riot ID 자동완성 인덱스를 캐시하고,
 연결되지 않거나 장애가 나면 PostgreSQL에서 조회합니다.
 
+업무 변경은 같은 트랜잭션에서 PostgreSQL의 관련 `cache_revisions`를 증가시킵니다.
+읽기는 현재 권한과 revision을 확인한 뒤 해당 버전의 Redis 결과를 사용하므로,
+모임원 목록을 하루 보관해도 회원·계정 변경 이후에는 새 결과를 읽습니다.
+전적은 현재 신원, 연결 계정, 전체 통계, 경기 페이지를 나눠 다음 페이지에서 통계를 재사용합니다.
+정책 기본값은 비활성이며, migration과 모든 writer 전환 확인 후 활성화합니다.
+TTL과 전환·복구 절차는 [Redis 안내](redis.md)를 참고하세요.
+
 검색 제출은 현재 DB의 이름·Riot ID와 계정 연결을 확인합니다. 일치하는 모임원이 한 명이면
 전적으로 이동하고, 여러 명이면 선택 목록을 표시합니다.
 검색은 [`nickname-search.ts`](../src/lib/nickname-search.ts), 캐시는

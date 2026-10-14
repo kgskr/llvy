@@ -39,6 +39,12 @@ vi.mock("@/lib/games", () => ({
 }));
 vi.mock("@/lib/member-history", () => ({
   getMemberHistory: mocks.history,
+  getMemberAccounts: async (id: string) => (await mocks.history(id)).accounts,
+  getMemberHistoryPage: async (id: string) => (await mocks.history(id)).games,
+  getMemberHistoryAggregates: async (id: string) => {
+    const { stats, championStats, positionStats } = await mocks.history(id);
+    return { stats, championStats, positionStats };
+  },
   getMemberIdentity: async (id: string) =>
     (await mocks.history(id))?.member ?? null,
 }));

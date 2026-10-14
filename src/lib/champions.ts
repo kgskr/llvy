@@ -1,4 +1,5 @@
 import "server-only";
+import { measureCache } from "@/lib/cache-metrics";
 
 // Resolve internal champion names (the .rofl `SKIN` field, e.g. "MonkeyKing")
 // to localized display names ("오공") via Riot's DataDragon. Falls back to the
@@ -99,7 +100,7 @@ async function loadChampionMap(): Promise<ChampionMap> {
 export async function resolveChampionNames(
   internalNames: string[],
 ): Promise<Map<string, string>> {
-  const map = await loadChampionMap();
+  const map = await measureCache("asset_lookup_ms", loadChampionMap);
   const result = new Map<string, string>();
   for (const name of internalNames) {
     result.set(name, map.get(name)?.name ?? name);
@@ -111,7 +112,7 @@ export async function resolveChampionNames(
 export async function resolveChampionPortraits(
   internalNames: string[],
 ): Promise<Map<string, string>> {
-  const map = await loadChampionMap();
+  const map = await measureCache("asset_lookup_ms", loadChampionMap);
   const result = new Map<string, string>();
   for (const name of internalNames) {
     const iconUrl = map.get(name)?.iconUrl;
