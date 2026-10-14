@@ -1,3 +1,5 @@
+> 완료 항목은 당시 작업 이력이다. 후속 변경을 반영한 현재 계약은 `openspec/specs`에 있으며, 아래 미완료 검증 항목은 그대로 유지한다. 삭제된 날짜별 검증 기록은 Git 이력에서 확인할 수 있다.
+
 ## 1. 기준 테스트와 설정
 
 - [x] 1.1 Codex Security finding별 회귀 테스트 초안을 추가한다: rotated `x-forwarded-for`, same-store Blob URL cleanup, oversized `statsJson`
