@@ -9,7 +9,8 @@ const DAY_SECONDS = 60 * 60 * 24;
 const LOOKUP_TIMEOUT_MS = 2_000;
 
 type ChampionMap = Map<string, string>;
-let memo: ChampionMap | null = null;
+let memo: { map: ChampionMap; expiresAt: number } | null = null;
+let pending: Promise<ChampionMap> | null = null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -49,8 +50,7 @@ async function fetchChampionMap(signal: AbortSignal): Promise<ChampionMap> {
   return map;
 }
 
-async function loadChampionMap(): Promise<ChampionMap> {
-  if (memo) return memo;
+async function refreshChampionMap(): Promise<ChampionMap> {
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -65,7 +65,9 @@ async function loadChampionMap(): Promise<ChampionMap> {
         }, LOOKUP_TIMEOUT_MS);
       }),
     ]);
-    if (map.size > 0) memo = map;
+    if (map.size > 0) {
+      memo = { map, expiresAt: Date.now() + DAY_SECONDS * 1000 };
+    }
     return map;
   } catch {
     // Offline / DataDragon down: callers fall back to internal names.
@@ -73,6 +75,17 @@ async function loadChampionMap(): Promise<ChampionMap> {
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function loadChampionMap(): Promise<ChampionMap> {
+  if (memo && memo.expiresAt > Date.now()) return memo.map;
+  memo = null;
+  if (!pending) {
+    pending = refreshChampionMap().finally(() => {
+      pending = null;
+    });
+  }
+  return pending;
 }
 
 /** Map internal champion names to display names (best effort). */
