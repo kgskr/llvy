@@ -1,10 +1,11 @@
 import "server-only";
 
-import { desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
+import { desc, eq, inArray, isNotNull, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { gameParticipants, games, members, riotAccounts } from "@/db/schema";
 import { isUuid } from "@/lib/validation";
+import { readItemSlots } from "@/lib/item-slots";
 
 export type GameVisibility = "active" | "excluded";
 
@@ -18,6 +19,22 @@ export type GameListItem = {
   comment: string | null;
 };
 
+export type GameListParticipant = Pick<
+  GameParticipantRow,
+  | "id"
+  | "team"
+  | "position"
+  | "champion"
+  | "gameName"
+  | "tagLine"
+  | "memberId"
+  | "memberName"
+>;
+
+export type GameListWithParticipants = GameListItem & {
+  participants: GameListParticipant[];
+};
+
 export type GameParticipantRow = {
   id: string;
   team: number | null;
@@ -28,6 +45,7 @@ export type GameParticipantRow = {
   deaths: number | null;
   assists: number | null;
   goldEarned: number | null;
+  items: (number | null)[];
   gameName: string;
   tagLine: string;
   memberId: string | null;
@@ -101,6 +119,66 @@ export async function countGames(
   return rows[0].total;
 }
 
+/** Page games before reading their rosters; no raw stats or per-game queries. */
+export async function listGamesWithParticipants(
+  limit = 10,
+  offset = 0,
+  visibility: GameVisibility = "active",
+): Promise<GameListWithParticipants[]> {
+  const page = await db
+    .select({
+      id: games.id,
+      playedAt: effectivePlayedAt,
+      playedAtSource: effectivePlayedAtSource,
+      durationMs: games.durationMs,
+      winningTeam: games.winningTeam,
+      comment: games.comment,
+    })
+    .from(games)
+    .where(visibilityFilter(visibility))
+    .orderBy(desc(effectivePlayedAt), desc(games.uploadedAt), desc(games.id))
+    .limit(
+      Number.isSafeInteger(limit) && limit >= 0 ? Math.min(limit, 100) : 10,
+    )
+    .offset(Number.isSafeInteger(offset) && offset >= 0 ? offset : 0);
+  if (page.length === 0) return [];
+
+  const participants = await db
+    .select({
+      gameId: gameParticipants.gameId,
+      id: gameParticipants.id,
+      team: gameParticipants.team,
+      position: gameParticipants.position,
+      champion: gameParticipants.champion,
+      gameName: riotAccounts.gameName,
+      tagLine: riotAccounts.tagLine,
+      memberId: members.id,
+      memberName: members.name,
+    })
+    .from(gameParticipants)
+    .innerJoin(
+      riotAccounts,
+      eq(gameParticipants.riotAccountId, riotAccounts.id),
+    )
+    .leftJoin(members, eq(riotAccounts.memberId, members.id))
+    .where(
+      inArray(
+        gameParticipants.gameId,
+        page.map((game) => game.id),
+      ),
+    );
+  const byGame = new Map<string, GameListParticipant[]>();
+  for (const { gameId, ...participant } of participants) {
+    const roster = byGame.get(gameId) ?? [];
+    roster.push(participant);
+    byGame.set(gameId, roster);
+  }
+  return page.map((game) => {
+    const roster = byGame.get(game.id) ?? [];
+    return { ...game, participants: roster, participantCount: roster.length };
+  });
+}
+
 /** A single game with its participants, each resolved to a member if linked. */
 export async function getGameDetail(id: string): Promise<GameDetail | null> {
   if (!isUuid(id)) return null;
@@ -123,6 +201,7 @@ export async function getGameDetail(id: string): Promise<GameDetail | null> {
       deaths: gameParticipants.deaths,
       assists: gameParticipants.assists,
       goldEarned: gameParticipants.goldEarned,
+      rawStats: gameParticipants.rawStats,
       gameName: riotAccounts.gameName,
       tagLine: riotAccounts.tagLine,
       memberId: members.id,
@@ -149,6 +228,9 @@ export async function getGameDetail(id: string): Promise<GameDetail | null> {
     gameVersion: game.gameVersion,
     winningTeam: game.winningTeam,
     originalFilename: game.originalFilename,
-    participants,
+    participants: participants.map(({ rawStats, ...participant }) => ({
+      ...participant,
+      items: readItemSlots(rawStats),
+    })),
   };
 }

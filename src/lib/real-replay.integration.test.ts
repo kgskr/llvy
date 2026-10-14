@@ -19,6 +19,8 @@ import {
 import { gameParticipants, games, riotAccounts } from "@/db/schema";
 
 import { formatKoreaDateInput } from "./game-date";
+import { readItemSlots } from "./item-slots";
+import { readParticipantLoadout } from "./participant-loadout";
 import type { GameParticipantRow } from "./games";
 import type { IngestResult } from "./ingest";
 import type { CreatedPendingUpload } from "./pending-upload-store";
@@ -167,6 +169,7 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
       deaths: participant.deaths,
       assists: participant.assists,
       goldEarned: participant.goldEarned,
+      items: participant.items,
     };
   }
 
@@ -195,6 +198,7 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
       deaths: participant.deaths,
       assists: participant.assists,
       goldEarned: participant.goldEarned,
+      items: readItemSlots(participant.raw),
     }));
     const actual = detail!.participants.map(comparableParticipant);
     const sort = (a: { gameName: string; tagLine: string }, b: typeof a) =>
@@ -293,6 +297,29 @@ describe.skipIf(!replayFile)("private replay end-to-end processing", () => {
         linked?.tagLine === account.tagLine,
     ).toBe(true);
     expect(linked?.memberName).toBe("Replay test member");
+    const { getMemberHistory } = await import("./member-history");
+    const history = await getMemberHistory(memberId);
+    const ownParsed = parsed.participants.find(
+      (participant) =>
+        participant.riotGameName === account.gameName &&
+        participant.riotTagLine === account.tagLine,
+    )!;
+    expect(ownParsed !== undefined).toBe(true);
+    expect(
+      isDeepStrictEqual(
+        { level: history?.games[0].level, items: history?.games[0].items },
+        readParticipantLoadout(ownParsed.raw),
+      ),
+      "Member card loadout matches the private replay",
+    ).toBe(true);
+    expect(history?.games[0].participants.length).toBe(
+      parsed.participants.length,
+    );
+    expect(
+      history?.games[0].participants.filter(
+        (participant) => participant.isMember,
+      ).length,
+    ).toBe(1);
     expect((await memberQueries.listUnlinkedAccounts()).length).toBe(
       parsed.participants.length - 1,
     );

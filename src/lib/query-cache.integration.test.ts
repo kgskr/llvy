@@ -490,6 +490,116 @@ describe.skipIf(!testUrl)(
       expect(JSON.stringify(warn.mock.calls)).not.toContain("fixture-secret");
     });
 
+    it("isolates old game lists, caches minimal rosters, and refreshes member identities after mutations", async () => {
+      const { member, account } = await seed();
+      await cachedQuery(
+        { query: "game-list", role: "owner", args: [10, 1, "active"] },
+        async () => ({ legacy: true }),
+      );
+      const read = () => getGameListReadModel(10, undefined);
+      const initial = await read();
+      expect(initial.games[0].participants[0]).toMatchObject({
+        memberId: member.id,
+        memberName: member.name,
+      });
+      const query = vi.spyOn(postgres, "query");
+      try {
+        expect(await read()).toEqual(initial);
+        expect(
+          query.mock.calls.some(([sql]) => sql.includes('"game_participants"')),
+        ).toBe(false);
+      } finally {
+        query.mockRestore();
+      }
+      const key = (await dataKeys()).find((key) =>
+        key.includes(":game-list-v2:"),
+      )!;
+      const stored = (await redis.get(key))!;
+      expect(stored).not.toMatch(/birthYear|birth_year|puuid|rawStats|blobUrl/);
+      expect(await redis.ttl(key)).toBeGreaterThanOrEqual(58);
+      await updateMember(member.id, "이변경", 1990);
+      expect((await read()).games[0].participants[0].memberName).toBe("이변경");
+      await unlinkAccount(account.id);
+      expect((await read()).games[0].participants[0]).toMatchObject({
+        memberId: null,
+        memberName: null,
+        gameName: account.gameName,
+        tagLine: account.tagLine,
+      });
+      await linkAccount(account.id, member.id);
+      expect((await read()).games[0].participants[0].memberName).toBe("이변경");
+      await deleteMember(member.id);
+      expect((await read()).games[0].participants[0]).toMatchObject({
+        memberId: null,
+        memberName: null,
+      });
+      mocks.token = undefined;
+      await expect(read()).rejects.toThrow("redirect:/login");
+    });
+
+    it("isolates old member history and reuses enriched rosters without participant reads", async () => {
+      const { member } = await seed();
+      await db.update(gameParticipants).set({
+        rawStats: { LEVEL: "17", ITEM0: "3158", PUUID: "private-roster" },
+      });
+      await cachedQuery(
+        { query: "member-history", role: "owner", args: [member.id, 25, 0] },
+        async () => ({ legacy: true }),
+      );
+      const initial = await getMemberHistoryReadModel(member.id);
+      expect(initial.history?.games[0]).toMatchObject({
+        level: 17,
+        items: [3158, null, null, null, null, null, null],
+      });
+      expect(initial.history?.games[0].participants).toHaveLength(1);
+      const query = vi.spyOn(postgres, "query");
+      try {
+        expect(await getMemberHistoryReadModel(member.id)).toEqual(initial);
+        expect(
+          query.mock.calls.some(([sql]) => sql.includes('"game_participants"')),
+        ).toBe(false);
+      } finally {
+        query.mockRestore();
+      }
+      const key = (await dataKeys()).find((key) =>
+        key.includes(":member-history-v2:"),
+      )!;
+      const stored = (await redis.get(key))!;
+      expect(stored).not.toMatch(/rawStats|PUUID|private-roster/);
+      expect(await redis.ttl(key)).toBeGreaterThanOrEqual(58);
+    });
+
+    it("isolates old detail cache entries and reuses projected item slots without raw stats", async () => {
+      const { game } = await seed();
+      await db.update(gameParticipants).set({
+        rawStats: {
+          ITEM0: "3158",
+          ITEM1: "0",
+          ITEM6: "3340",
+          PUUID: "private-fixture",
+        },
+      });
+      await cachedQuery(
+        { query: "game-detail", role: "owner", args: [game.id] },
+        async () => ({ legacy: true }),
+      );
+      const detail = await getGameDetailReadModel(game.id);
+      expect(detail.game?.participants[0].items).toEqual([
+        3158,
+        0,
+        null,
+        null,
+        null,
+        null,
+        3340,
+      ]);
+      expect(detail.game?.participants[0]).not.toHaveProperty("rawStats");
+      const selects = vi.spyOn(db, "select");
+      expect(await getGameDetailReadModel(game.id)).toEqual(detail);
+      expect(businessSelectCount(selects.mock.calls)).toBe(0);
+      expect(JSON.stringify(detail)).not.toContain("private-fixture");
+    });
+
     it("keeps a committed mutation successful when cache invalidation fails", async () => {
       const { game } = await seed();
       await getGameDetailReadModel(game.id);

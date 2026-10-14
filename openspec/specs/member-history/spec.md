@@ -22,6 +22,44 @@ The system SHALL provide authenticated member-list and member-detail pages. A de
 - **WHEN** the member identifier is invalid or absent
 - **THEN** the page responds as not found
 
+### Requirement: Color recent-game rows by outcome
+
+The member-detail recent-game list SHALL use a dark blue background (`#28344E`) for winning card rows and a dark red background (`#59343B`) for losing card rows. Decided rows SHALL use readable neutral text, and result labels SHALL appear as plain text without a separate colored badge. Unknown results SHALL retain a neutral background. Hovering a decided row SHALL retain its outcome background.
+
+#### Scenario: View recent results
+
+- **WHEN** recent games include wins, losses, and unknown outcomes
+- **THEN** winning rows are blue, losing rows are red, and unknown rows use a neutral background
+- **AND** ‘승리’, ‘패배’, and ‘미정’ appear as plain result text
+
+### Requirement: Show compact recent-game cards
+
+Each recent-game card SHALL display outcome, calendar date, duration, champion portrait and name, level when available, K/D/A, seven final inventory slots, and both teams' participant names and champion portraits. It SHALL retain the game-detail link and pagination. The member's linked participants SHALL be highlighted. Team and position ordering SHALL be deterministic; unknown teams SHALL remain visible. Cards SHALL fit narrow screens by reflowing their contents.
+
+#### Scenario: A complete replay
+
+- **WHEN** a recent game contains the member's unambiguous participant and both teams
+- **THEN** its card shows the requested participant statistics and both team rosters, with item names available through accessible labels and tooltips
+
+#### Scenario: Missing or ambiguous data
+
+- **WHEN** level, item, champion, team, or counter data is missing, or multiple linked accounts played in the same game
+- **THEN** unavailable personal data is not invented, the existing account-link warning remains available, and the roster still displays all stored participants
+
+### Requirement: Batch recent-game enrichment by page
+
+The system SHALL fetch additional participant information with at most one database query for the current page's game IDs, after pagination. Empty pages SHALL skip that query. The response and role-specific cache SHALL omit raw replay objects, PUUIDs, birth years of roster participants, and unneeded participant statistics. Full-history aggregates SHALL remain independent of pagination. A new cache identity SHALL separate enriched results from the earlier data shape.
+
+#### Scenario: Multiple recent games
+
+- **WHEN** a page contains multiple games
+- **THEN** a single additional query fetches all requested rosters and own-player loadouts, with no query for games outside the page
+
+#### Scenario: Cached or empty page
+
+- **WHEN** an enriched page is served from a valid cache entry or contains no games
+- **THEN** no additional participant query is issued
+
 ### Requirement: Present member information with one detail link
 
 The member-list page SHALL use the heading ‘모임원 정보’. Each member's name SHALL link to the member-detail page and display as `name(birthYear)` when an admin or owner views a recorded birth year, or as the name alone otherwise. Viewer payloads and HTML MUST omit birth years. The member card SHALL NOT include a separate ‘전적 보기’ link to the same page.
@@ -69,6 +107,20 @@ The member-detail page SHALL display a champion summary above the linked Riot ac
 
 - **WHEN** the member has no qualifying champion games
 - **THEN** the page displays an empty champion-summary state above the linked accounts
+
+### Requirement: Display champion portraits in member summaries
+
+The member-detail ‘플레이한 챔피언’ table SHALL show a portrait to the left of each champion name, using the same cached DataDragon catalog as the localized names. Missing or failed images SHALL display a fixed-size placeholder while retaining the champion name. The header SHALL show the linked-account count without the sentence ‘제외된 경기는 집계하지 않습니다.’. Existing exclusion rules for all statistics SHALL remain unchanged.
+
+#### Scenario: Champion portrait is available
+
+- **WHEN** a champion summary has a known portrait
+- **THEN** its row shows the portrait before the localized champion name without an additional catalog request
+
+#### Scenario: Portrait is unavailable
+
+- **WHEN** a portrait is missing or fails to load
+- **THEN** the row retains the champion name and a fixed-size placeholder
 
 ### Requirement: Show position summaries below champion summaries
 

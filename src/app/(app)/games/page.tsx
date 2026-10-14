@@ -1,14 +1,17 @@
 import Link from "next/link";
 
 import { getGameListReadModel } from "@/lib/read-model";
-import { formatGameDate, formatDuration, teamLabel } from "@/lib/format";
-import { playedAtSourceLabel } from "@/lib/game-date";
+import {
+  resolveChampionNames,
+  resolveChampionPortraits,
+} from "@/lib/champions";
 
-import { GameFeedbackProvider, GameVisibilityForm } from "./forms";
+import { GameFeedbackProvider } from "./forms";
+import { GameList } from "./game-list";
 
 export const dynamic = "force-dynamic";
 
-const PAGE_SIZE = 25;
+const PAGE_SIZE = 10;
 
 export default async function GamesPage({
   searchParams,
@@ -26,6 +29,21 @@ export default async function GamesPage({
   const isAdmin = role !== "viewer";
   const canRestore = excluded && isAdmin;
   const viewQuery = excluded ? "view=excluded&" : "";
+  const champions = [
+    ...new Set(
+      games.flatMap((game) =>
+        game.participants.flatMap((player) =>
+          player.champion ? [player.champion] : [],
+        ),
+      ),
+    ),
+  ];
+  const [championNames, championPortraits] = champions.length
+    ? await Promise.all([
+        resolveChampionNames(champions),
+        resolveChampionPortraits(champions),
+      ])
+    : [new Map<string, string>(), new Map<string, string>()];
 
   return (
     <section className="stack">
@@ -67,57 +85,14 @@ export default async function GamesPage({
             ) : null}
           </p>
         ) : (
-          <div className="table-scroll">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>게임 날짜</th>
-                  <th>길이</th>
-                  <th>승리 팀</th>
-                  <th>인원</th>
-                  <th>코멘트</th>
-                  <th />
-                  {canRestore ? <th>복구</th> : null}
-                </tr>
-              </thead>
-              <tbody>
-                {games.map((game) => (
-                  <tr key={game.id}>
-                    <td>
-                      {formatGameDate(game.playedAt)}
-                      <span className="muted">
-                        {" "}
-                        ({playedAtSourceLabel(game.playedAtSource)})
-                      </span>
-                    </td>
-                    <td>{formatDuration(game.durationMs)}</td>
-                    <td>{teamLabel(game.winningTeam)}</td>
-                    <td>{game.participantCount}</td>
-                    <td
-                      style={{
-                        whiteSpace: "pre-wrap",
-                        overflowWrap: "anywhere",
-                      }}
-                    >
-                      {game.comment ?? "—"}
-                    </td>
-                    <td>
-                      <Link
-                        href={`/games/${game.id}?view=${visibility}&page=${page}`}
-                      >
-                        상세 →
-                      </Link>
-                    </td>
-                    {canRestore ? (
-                      <td>
-                        <GameVisibilityForm gameId={game.id} excluded />
-                      </td>
-                    ) : null}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <GameList
+            games={games}
+            championNames={championNames}
+            championPortraits={championPortraits}
+            visibility={visibility}
+            page={page}
+            canRestore={canRestore}
+          />
         )}
         {pageCount > 1 ? (
           <nav className="cta-row" aria-label="게임 목록 페이지">

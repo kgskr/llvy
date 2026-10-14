@@ -1,25 +1,20 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
-import { resolveChampionNames } from "@/lib/champions";
+import { AssetIcon } from "@/app/(app)/asset-icon";
 import {
-  formatGameDate,
-  formatDuration,
-  positionLabel,
-  riotId,
-} from "@/lib/format";
-import { playedAtSourceLabel } from "@/lib/game-date";
+  resolveChampionNames,
+  resolveChampionPortraits,
+} from "@/lib/champions";
+import { positionLabel, riotId } from "@/lib/format";
+import { resolveMemberGameAssets } from "@/lib/member-game-assets";
+import { RecentGames } from "./recent-games";
 import { getMemberHistoryReadModel } from "@/lib/read-model";
 import { parsePageNumber } from "@/lib/validation";
 
 export const dynamic = "force-dynamic";
 
 const PAGE_SIZE = 25;
-const RESULTS = {
-  win: { label: "승리", className: "badge badge-win" },
-  loss: { label: "패배", className: "badge badge-loss" },
-  unknown: { label: "미정", className: "badge badge-muted" },
-};
 
 function average(value: number | null): string {
   return value === null ? "—" : value.toFixed(1);
@@ -56,14 +51,16 @@ export default async function MemberHistoryPage({
 
   const { member, accounts, stats, games, championStats, positionStats } =
     history;
-  const champions = [
-    ...championStats.map((summary) => summary.champion),
-    ...games.flatMap((game) => (game.champion ? [game.champion] : [])),
-  ];
-  const championNames =
-    champions.length > 0
-      ? await resolveChampionNames(champions)
-      : new Map<string, string>();
+  const champions = championStats.map((summary) => summary.champion);
+  const [championNames, championPortraits, recentAssets] = await Promise.all([
+    champions.length
+      ? resolveChampionNames(champions)
+      : new Map<string, string>(),
+    champions.length
+      ? resolveChampionPortraits(champions)
+      : new Map<string, string>(),
+    resolveMemberGameAssets(games),
+  ]);
 
   return (
     <section className="stack">
@@ -72,9 +69,7 @@ export default async function MemberHistoryPage({
           <Link href="/members">← 모임원 목록</Link>
         </p>
         <h1>{member.name}의 전적</h1>
-        <p className="muted">
-          연결된 계정 {accounts.length}개 · 제외된 경기는 집계하지 않습니다.
-        </p>
+        <p className="muted">연결된 계정 {accounts.length}개</p>
       </div>
 
       <dl className="stats-grid">
@@ -130,7 +125,15 @@ export default async function MemberHistoryPage({
                     key={JSON.stringify([summary.champion, summary.position])}
                   >
                     <th scope="row">
-                      {championNames.get(summary.champion) ?? summary.champion}
+                      <span className="game-champion">
+                        <AssetIcon
+                          src={championPortraits.get(summary.champion)}
+                          label="챔피언 초상화"
+                          decorative
+                        />
+                        {championNames.get(summary.champion) ??
+                          summary.champion}
+                      </span>
                     </th>
                     <td>{positionLabel(summary.position)}</td>
                     <td>{summary.totalGames.toLocaleString()}경기</td>
@@ -232,66 +235,11 @@ export default async function MemberHistoryPage({
             <p className="muted">
               {page} / {pageCount}페이지
             </p>
-            <div className="table-scroll">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>경기 날짜</th>
-                    <th>결과</th>
-                    <th>챔피언 / 포지션</th>
-                    <th>K / D / A</th>
-                    <th>길이</th>
-                    <th>
-                      <span className="sr-only">상세 보기</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {games.map((game) => (
-                    <tr key={game.id}>
-                      <td>
-                        {formatGameDate(game.playedAt)}
-                        <small className="table-note">
-                          {playedAtSourceLabel(game.playedAtSource)}
-                        </small>
-                      </td>
-                      <td>
-                        <span className={RESULTS[game.result].className}>
-                          {RESULTS[game.result].label}
-                        </span>
-                      </td>
-                      <td>
-                        {game.ambiguous ? (
-                          isAdmin ? (
-                            <Link href="/admin">계정 중복 연결 확인</Link>
-                          ) : (
-                            <span>계정 중복 연결 확인 필요</span>
-                          )
-                        ) : (
-                          <>
-                            {game.champion
-                              ? (championNames.get(game.champion) ??
-                                game.champion)
-                              : "—"}
-                            <small className="table-note">
-                              {positionLabel(game.position)}
-                            </small>
-                          </>
-                        )}
-                      </td>
-                      <td>
-                        {game.kills ?? "—"} / {game.deaths ?? "—"} /{" "}
-                        {game.assists ?? "—"}
-                      </td>
-                      <td>{formatDuration(game.durationMs)}</td>
-                      <td>
-                        <Link href={`/games/${game.id}`}>상세 →</Link>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <RecentGames
+              games={games}
+              assetsByVersion={recentAssets}
+              isAdmin={isAdmin}
+            />
             {pageCount > 1 ? (
               <nav className="cta-row" aria-label="모임원 전적 페이지">
                 {page > 1 ? (

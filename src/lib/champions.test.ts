@@ -50,6 +50,45 @@ describe("champion display names", () => {
     ).toEqual({ Ahri: "아리", Unknown: "Unknown", Broken: "Broken" });
   });
 
+  it("shares the name lookup with portraits and keeps names when image metadata is missing or unsafe", async () => {
+    vi.mocked(fetch)
+      .mockResolvedValueOnce(Response.json(["16.19.1"]))
+      .mockResolvedValueOnce(
+        Response.json({
+          data: {
+            Ahri: { id: "Ahri", name: "아리", image: { full: "Ahri.png" } },
+            Missing: { id: "Missing", name: "이미지 없음" },
+            Unsafe: {
+              id: "Unsafe",
+              name: "잘못된 이미지",
+              image: { full: "../Ahri.png" },
+            },
+          },
+        }),
+      );
+    const { resolveChampionNames, resolveChampionPortraits } =
+      await import("./champions");
+    const names = ["Ahri", "Missing", "Unsafe", "Unknown"];
+    const [displayNames, portraits] = await Promise.all([
+      resolveChampionNames(names),
+      resolveChampionPortraits(names),
+    ]);
+    const expectedUrl =
+      "https://ddragon.leagueoflegends.com/cdn/16.19.1/img/champion/Ahri.png";
+    expect(Object.fromEntries(displayNames)).toEqual({
+      Ahri: "아리",
+      Missing: "이미지 없음",
+      Unsafe: "잘못된 이미지",
+      Unknown: "Unknown",
+    });
+    expect(Object.fromEntries(portraits)).toEqual({ Ahri: expectedUrl });
+    portraits.set("Ahri", "caller mutation");
+    expect((await resolveChampionPortraits(["Ahri"])).get("Ahri")).toBe(
+      expectedUrl,
+    );
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+
   it("expires 24 hours after completion without extending the lifetime on reads", async () => {
     vi.useFakeTimers();
     const versions = deferredResponse();

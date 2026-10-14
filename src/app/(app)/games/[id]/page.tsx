@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { resolveChampionNames } from "@/lib/champions";
+import { resolveGameAssets } from "@/lib/game-assets";
 import type { GameParticipantRow } from "@/lib/games";
 import { getGameDetailReadModel } from "@/lib/read-model";
 import { playedAtSourceLabel } from "@/lib/game-date";
@@ -10,8 +10,6 @@ import {
   formatGameDate,
   formatDuration,
   POSITION_ORDER,
-  positionLabel,
-  riotId,
   teamLabel,
 } from "@/lib/format";
 
@@ -21,6 +19,7 @@ import {
   GameFeedbackProvider,
   GameVisibilityForm,
 } from "../forms";
+import { TeamBlock, type TeamResult } from "./participant-table";
 
 export const dynamic = "force-dynamic";
 
@@ -49,10 +48,12 @@ export default async function GameDetailPage({
     view === "excluded" || (!view && Boolean(game.excludedAt));
   const backHref = `/games?${returnToExcluded ? "view=excluded&" : ""}page=${parsePageNumber(page)}`;
 
-  const championNames = await resolveChampionNames(
+  const assets = await resolveGameAssets(
+    game.gameVersion,
     game.participants
       .map((p) => p.champion)
       .filter((c): c is string => Boolean(c)),
+    game.participants.flatMap((p) => p.items ?? []),
   );
 
   const teams = [100, 200].map((team) => ({
@@ -111,7 +112,7 @@ export default async function GameDetailPage({
               title={`${teamLabel(team)} 팀`}
               result={result}
               players={players}
-              championNames={championNames}
+              assets={assets}
             />
           ),
         )}
@@ -121,7 +122,7 @@ export default async function GameDetailPage({
             title="팀 미상"
             result="unknown"
             players={unassigned}
-            championNames={championNames}
+            assets={assets}
           />
         ) : null}
         {isAdmin ? (
@@ -155,82 +156,7 @@ export default async function GameDetailPage({
   );
 }
 
-type TeamResult = "win" | "loss" | "unknown";
-
 function gameResult(winningTeam: number | null, team: number): TeamResult {
   if (winningTeam == null) return "unknown";
   return winningTeam === team ? "win" : "loss";
-}
-
-const RESULT_BADGE: Record<TeamResult, { className: string; label: string }> = {
-  win: { className: "badge badge-win", label: "승리" },
-  loss: { className: "badge badge-loss", label: "패배" },
-  unknown: { className: "badge badge-muted", label: "미정" },
-};
-
-function TeamBlock({
-  title,
-  result,
-  players,
-  championNames,
-}: {
-  title: string;
-  result: TeamResult;
-  players: GameParticipantRow[];
-  championNames: Map<string, string>;
-}) {
-  const badge = RESULT_BADGE[result];
-  return (
-    <div className="team-block">
-      <h3>
-        {title} <span className={badge.className}>{badge.label}</span>
-      </h3>
-      <div className="table-scroll">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>포지션</th>
-              <th>라이엇 아이디</th>
-              <th>챔피언</th>
-              <th>모임원</th>
-              <th>K / D / A</th>
-              <th>골드</th>
-            </tr>
-          </thead>
-          <tbody>
-            {players.map((p) => (
-              <tr key={p.id}>
-                <td>
-                  {p.position ? (
-                    positionLabel(p.position)
-                  ) : (
-                    <span className="badge badge-muted">불명</span>
-                  )}
-                </td>
-                <td>{riotId(p.gameName, p.tagLine)}</td>
-                <td>
-                  {p.champion
-                    ? (championNames.get(p.champion) ?? p.champion)
-                    : "-"}
-                </td>
-                <td>
-                  {p.memberId && p.memberName ? (
-                    <Link href={`/members/${p.memberId}`}>{p.memberName}</Link>
-                  ) : (
-                    <span className="muted">미연결</span>
-                  )}
-                </td>
-                <td>
-                  {p.kills ?? "-"} / {p.deaths ?? "-"} / {p.assists ?? "-"}
-                </td>
-                <td>
-                  {p.goldEarned != null ? p.goldEarned.toLocaleString() : "-"}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
 }

@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import {
   countGames,
   getGameDetail,
-  listGames,
+  listGamesWithParticipants,
   type GameVisibility,
 } from "@/lib/games";
 import { getMemberHistory, getMemberIdentity } from "@/lib/member-history";
@@ -48,7 +48,7 @@ export async function getMembersReadModel() {
 export async function getGameDetailReadModel(id: string) {
   const role = await readRole();
   const projected = await cachedQuery(
-    { query: "game-detail", role, args: [id] },
+    { query: "game-detail-v2", role, args: [id] },
     async () => {
       const game = await getGameDetail(id);
       return game
@@ -74,6 +74,7 @@ export async function getGameDetailReadModel(id: string) {
               deaths: participant.deaths,
               assists: participant.assists,
               goldEarned: participant.goldEarned,
+              items: participant.items,
               gameName: participant.gameName,
               tagLine: participant.tagLine,
               memberId: participant.memberId,
@@ -93,7 +94,7 @@ export async function getMemberHistoryReadModel(
 ) {
   const role = await readRole();
   const projected = await cachedQuery(
-    { query: "member-history", role, args: [id, limit, offset] },
+    { query: "member-history-v2", role, args: [id, limit, offset] },
     async () => {
       const history = await getMemberHistory(id, limit, offset);
       return history
@@ -145,12 +146,12 @@ export async function getGameListReadModel(
   const role = await readRole();
   const requested = parsePageNumber(requestedPage);
   const listing = await cachedQuery(
-    { query: "game-list", role, args: [pageSize, requested, visibility] },
+    { query: "game-list-v2", role, args: [pageSize, requested, visibility] },
     async () => {
       const total = await countGames(visibility);
       const pageCount = Math.max(1, Math.ceil(total / pageSize));
       const page = Math.min(requested, pageCount);
-      const games = await listGames(
+      const games = await listGamesWithParticipants(
         pageSize,
         (page - 1) * pageSize,
         visibility,

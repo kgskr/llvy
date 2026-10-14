@@ -78,6 +78,7 @@ vi.mock("@/lib/games", () => ({
   getGameDetail: mocks.getGameDetail,
   countGames: mocks.countGames,
   listGames: mocks.listGames,
+  listGamesWithParticipants: mocks.listGames,
 }));
 vi.mock("@/lib/member-history", () => ({
   getMemberHistory: mocks.getMemberHistory,
@@ -102,6 +103,16 @@ vi.mock("@/lib/audit", () => ({
 }));
 vi.mock("@/lib/champions", () => ({
   resolveChampionNames: async () => new Map(),
+  resolveChampionPortraits: async () =>
+    new Map([
+      [
+        "Ahri",
+        "https://ddragon.leagueoflegends.com/cdn/16.19.1/img/champion/Ahri.png",
+      ],
+    ]),
+}));
+vi.mock("@/lib/game-assets", () => ({
+  resolveGameAssets: async () => ({ champions: new Map(), items: new Map() }),
 }));
 vi.mock("@/app/(app)/games/forms", () => ({
   GameFeedbackProvider: ({ children }: { children: React.ReactNode }) =>
@@ -233,6 +244,29 @@ const GAME = {
   participants: [],
   participantCount: 10,
 };
+
+it.each(["active", "excluded"])(
+  "uses ten-game pages with valid navigation for %s records",
+  async (view) => {
+    mocks.token = await sessionToken("owner");
+    mocks.countGames.mockResolvedValue(23);
+    let html = renderToStaticMarkup(
+      await GamesPage({ searchParams: Promise.resolve({ view, page: "2" }) }),
+    );
+    expect(mocks.listGames).toHaveBeenLastCalledWith(10, 10, view);
+    expect(html).toContain("2 / 3페이지");
+    expect(html).toContain(`?view=${view}&amp;page=2`);
+    expect(html).toContain(
+      view === "excluded" ? "/games?view=excluded&amp;page=3" : "/games?page=3",
+    );
+    html = renderToStaticMarkup(
+      await GamesPage({ searchParams: Promise.resolve({ view, page: "999" }) }),
+    );
+    expect(mocks.listGames).toHaveBeenLastCalledWith(10, 20, view);
+    expect(html).toContain("3 / 3페이지");
+    expect(html).not.toContain("다음 →");
+  },
+);
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -495,11 +529,14 @@ describe("verified role visibility", () => {
     );
     expect(html).toContain('<th scope="col">포지션</th>');
     for (const label of ["미드", "서폿", "불명"]) {
-      expect(html).toContain(
-        `<th scope="row">Ahri</th><td>${label}</td><td>1경기</td>`,
-      );
+      expect(html).toContain(`Ahri</span></th><td>${label}</td><td>1경기</td>`);
     }
-    expect(html.match(/<th scope="row">Ahri<\/th>/g)).toHaveLength(3);
+    expect(
+      html.match(
+        /<img[^>]*src="[^"]*\/champion\/Ahri\.png"[^>]*\/><\/span>Ahri/g,
+      ),
+    ).toHaveLength(3);
+    expect(html).not.toContain("제외된 경기는 집계하지 않습니다.");
     expect(html).toContain('<th scope="col">플레이 횟수</th>');
     expect(html).toContain(
       '<th scope="row">미드</th><td>2회</td><td>50.0%</td>',

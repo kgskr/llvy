@@ -49,7 +49,12 @@ vi.mock("next/headers", () => ({
 
 import { createTestSession } from "@/test/auth";
 import { setGameExcluded, setGamePlayedAt } from "./game-mutations";
-import { countGames, getGameDetail, listGames } from "./games";
+import {
+  countGames,
+  getGameDetail,
+  listGames,
+  listGamesWithParticipants,
+} from "./games";
 import { ingestReplay } from "./ingest";
 import { getMemberHistory } from "./member-history";
 import { createMember, linkAccount, unlinkAccount } from "./member-mutations";
@@ -335,7 +340,159 @@ describe("match management persistence", () => {
   });
 });
 
+describe("paged game list rosters", () => {
+  it("reads ten games before one bounded roster query and skips empty pages", async () => {
+    const stored = [];
+    for (let index = 1; index <= 12; index++) {
+      stored.push(await storeGame(undefined, day(index)));
+    }
+    const memberId = await createMember("목록 모임원", 1991);
+    await linkPuuid("main", memberId);
+    await setGameExcluded(stored[11].gameId, true);
+    await setGamePlayedAt(stored[0].gameId, day(30));
+    const query = vi.spyOn(client, "query");
+    const rosterQueries = () =>
+      query.mock.calls.filter(([sql]) =>
+        sql.includes('from "game_participants"'),
+      );
+    try {
+      const page = await listGamesWithParticipants();
+      expect(page).toHaveLength(10);
+      expect(page.map((game) => game.id)).toEqual(
+        [stored[0], ...stored.slice(2, 11).reverse()].map(
+          (game) => game.gameId,
+        ),
+      );
+      expect(query.mock.calls).toHaveLength(2);
+      expect(query.mock.calls[0][0]).not.toContain('"game_participants"');
+      expect(rosterQueries()).toHaveLength(1);
+      expect(rosterQueries()[0][1]).toEqual(page.map((game) => game.id));
+      expect(rosterQueries()[0][0]).not.toMatch(/raw_stats|puuid|birth_year/);
+      for (const game of page) {
+        expect(game.participantCount).toBe(2);
+        expect(game.participants).toHaveLength(2);
+        expect(
+          game.participants.find((player) => player.gameName === "main"),
+        ).toMatchObject({ memberId, memberName: "목록 모임원" });
+        expect(
+          game.participants.find((player) => player.gameName === "opponent"),
+        ).toMatchObject({ memberId: null, memberName: null, tagLine: "KR1" });
+        expect(Object.keys(game.participants[0]).sort()).toEqual([
+          "champion",
+          "gameName",
+          "id",
+          "memberId",
+          "memberName",
+          "position",
+          "tagLine",
+          "team",
+        ]);
+      }
+      query.mockClear();
+      expect(
+        (await listGamesWithParticipants(10, 10)).map((game) => game.id),
+      ).toEqual([stored[1].gameId]);
+      expect(rosterQueries()).toHaveLength(1);
+      expect(rosterQueries()[0][1]).toEqual([stored[1].gameId]);
+      query.mockClear();
+      expect(await listGamesWithParticipants(10, 20)).toEqual([]);
+      expect(rosterQueries()).toHaveLength(0);
+      query.mockClear();
+      expect(
+        (await listGamesWithParticipants(10, 0, "excluded")).map(
+          (game) => game.id,
+        ),
+      ).toEqual([stored[11].gameId]);
+      expect(rosterQueries()).toHaveLength(1);
+      expect(rosterQueries()[0][1]).toEqual([stored[11].gameId]);
+      query.mockClear();
+      expect(await listGamesWithParticipants(0)).toEqual([]);
+      expect(rosterQueries()).toHaveLength(0);
+    } finally {
+      query.mockRestore();
+    }
+  });
+});
+
 describe("combined member history", () => {
+  it("enriches only paginated games with one participant query and skips empty pages", async () => {
+    const stored = [];
+    for (let dayIndex = 1; dayIndex <= 4; dayIndex++) {
+      stored.push(
+        await storeGame(
+          [
+            player("main", {
+              LEVEL: "17",
+              ITEM0: "3158",
+              ITEM1: "0",
+              ITEM6: "3340",
+            }),
+            player(`opponent-${dayIndex}`, {
+              TEAM: "200",
+              WIN: "Fail",
+              LEVEL: "18",
+              ITEM0: "9999",
+            }),
+          ],
+          day(dayIndex),
+        ),
+      );
+    }
+    const memberId = await createMember("카드 모임원", 1991);
+    await linkPuuid("main", memberId);
+    const query = vi.spyOn(client, "query");
+    try {
+      const history = (await getMemberHistory(memberId, 2, 1))!;
+      const enrichments = query.mock.calls.filter(([sql]) =>
+        sql.includes("jsonb_build_object"),
+      );
+      expect(enrichments).toHaveLength(1);
+      const [, parameters] = enrichments[0];
+      expect(parameters).toEqual([
+        memberId,
+        memberId,
+        stored[2].gameId,
+        stored[1].gameId,
+      ]);
+      expect(history.stats.totalGames).toBe(4);
+      for (const game of history.games) {
+        expect(game).toMatchObject({
+          level: 17,
+          items: [3158, 0, null, null, null, null, 3340],
+        });
+        expect(game.participants).toHaveLength(2);
+        expect(game.participants.filter((p) => p.isMember)).toHaveLength(1);
+        expect(game.participants.map((p) => p.team).sort()).toEqual([100, 200]);
+        for (const participant of game.participants) {
+          expect(Object.keys(participant).sort()).toEqual([
+            "champion",
+            "gameName",
+            "id",
+            "isMember",
+            "position",
+            "tagLine",
+            "team",
+          ]);
+        }
+      }
+      expect(JSON.stringify(history.games)).not.toMatch(
+        /rawStats|PUUID|birthYear|9999/,
+      );
+      query.mockClear();
+      expect((await getMemberHistory(memberId, 1, 99))?.games).toEqual([]);
+      expect(
+        query.mock.calls.filter(([sql]) => sql.includes("jsonb_build_object")),
+      ).toHaveLength(0);
+      query.mockClear();
+      await getMemberHistory(memberId, 4);
+      expect(
+        query.mock.calls.filter(([sql]) => sql.includes("jsonb_build_object")),
+      ).toHaveLength(1);
+    } finally {
+      query.mockRestore();
+    }
+  });
+
   it("summarizes champions across pages and accounts without excluded or ambiguous games", async () => {
     await storeGame([
       player("main", { CHAMPIONS_KILLED: "6" }),
@@ -725,6 +882,8 @@ describe("combined member history", () => {
       kills: null,
       deaths: null,
       assists: null,
+      level: null,
+      items: [null, null, null, null, null, null, null],
     });
     expect(history?.stats).toEqual({
       totalGames: 2,

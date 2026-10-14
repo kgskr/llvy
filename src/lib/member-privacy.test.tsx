@@ -34,6 +34,7 @@ vi.mock("@/lib/members", () => ({
 vi.mock("@/lib/games", () => ({
   getGameDetail: mocks.gameDetail,
   listGames: mocks.listGames,
+  listGamesWithParticipants: mocks.listGames,
   countGames: mocks.countGames,
 }));
 vi.mock("@/lib/member-history", () => ({
@@ -43,6 +44,10 @@ vi.mock("@/lib/member-history", () => ({
 }));
 vi.mock("@/lib/champions", () => ({
   resolveChampionNames: async () => new Map(),
+  resolveChampionPortraits: async () => new Map(),
+}));
+vi.mock("@/lib/game-assets", () => ({
+  resolveGameAssets: async () => ({ champions: new Map(), items: new Map() }),
 }));
 vi.mock("@/app/login/actions", () => ({ logout: vi.fn() }));
 vi.mock("@/app/(app)/games/forms", () => ({
@@ -361,11 +366,12 @@ describe("read model authorization and page privacy", () => {
         expect(html).toContain("2026. 10. 2.");
         expect(html).toContain("20분 00초");
         expect(html).toContain("  &lt;script&gt;x&lt;/script&gt;\n 메모  ");
-        expect(html).toContain("white-space:pre-wrap");
         expect(html).not.toContain("<script>x</script>");
         expect(html).not.toContain("오후");
         expect(html).not.toContain("오전");
       }
+      expect(detail).toContain("white-space:pre-wrap");
+      expect(list).toContain('class="game-list-comment"');
       expect(detail.includes('data-management="comment"')).toBe(
         role !== "viewer",
       );

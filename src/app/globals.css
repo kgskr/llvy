@@ -411,8 +411,493 @@ button {
   background: var(--surface-soft);
 }
 
+.game-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.game-list-row {
+  --game-list-muted: var(--muted);
+  --game-list-rule: var(--border);
+  display: grid;
+  grid-template-columns: 124px minmax(0, 1fr) 78px;
+  gap: 14px 18px;
+  padding: 18px;
+  border-radius: 8px;
+  border-left: 4px solid #b1a79c;
+  background: var(--surface);
+  font-size: 0.82rem;
+}
+
+.game-list-blue,
+.game-list-red {
+  --game-list-muted: #ddd8e0;
+  --game-list-rule: rgba(255, 255, 255, 0.16);
+  color: #fffdf9;
+}
+
+.game-list-blue {
+  background: #28344e;
+  border-left-color: #78a7ff;
+}
+
+.game-list-red {
+  background: #59343b;
+  border-left-color: #e48f9c;
+}
+
+.game-list-overview {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  min-width: 0;
+}
+
+.game-list-overview time {
+  font-size: 0.88rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.game-list-date-source,
+.game-list-position {
+  color: var(--game-list-muted);
+  font-size: 0.7rem;
+}
+
+.game-list-duration {
+  color: var(--game-list-muted);
+  margin-top: 5px;
+  font-size: 0.78rem;
+}
+
+.game-list-result {
+  font-size: 0.78rem;
+}
+
+.game-list-teams {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.game-list-team {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.game-list-team h2 {
+  margin: 0;
+  font-size: 0.7rem;
+}
+
+.game-list-blue .game-list-team-blue h2,
+.game-list-red .game-list-team-blue h2 {
+  color: #aecbff;
+}
+
+.game-list-blue .game-list-team-red h2,
+.game-list-red .game-list-team-red h2 {
+  color: #ffc1c9;
+}
+
+.game-list-team ul {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.game-list-player {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.game-list-identity {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.game-list-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+a.game-list-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.game-list-no-players {
+  grid-column: 1 / -1;
+  color: var(--game-list-muted);
+  font-size: 0.75rem;
+}
+
+.game-list-actions {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 12px;
+  font-size: 0.78rem;
+}
+
+.game-list-actions .button {
+  padding: 7px 9px;
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+
+.game-list-comment {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--game-list-rule);
+  color: var(--game-list-muted);
+  margin: 0;
+  font-size: 0.75rem;
+}
+
+.game-list-comment > :first-child {
+  flex-shrink: 0;
+  font-size: 0.7rem;
+}
+
+.game-list-comment > :last-child {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.game-list-row :focus-visible {
+  outline-color: currentColor;
+}
+
+@media (max-width: 900px) {
+  .game-list-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .game-list-overview {
+    flex-direction: row;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 12px;
+  }
+
+  .game-list-date-source {
+    display: none;
+  }
+
+  .game-list-duration {
+    margin-top: 0;
+  }
+
+  .game-list-teams,
+  .game-list-comment {
+    grid-column: 1 / -1;
+  }
+
+  .game-list-actions {
+    grid-column: 2;
+    grid-row: 1;
+  }
+}
+
+@media (max-width: 560px) {
+  .game-list-row {
+    padding: 14px 12px;
+  }
+
+  .game-list-team {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .game-list-team + .game-list-team {
+    padding-top: 12px;
+    border-top: 1px solid var(--game-list-rule);
+  }
+
+  .game-list-team ul {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .game-list-name {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
+
+.member-game-win {
+  background: #28344e;
+}
+
+.member-game-loss {
+  background: #59343b;
+}
+
+.member-game-win,
+.member-game-loss {
+  --muted: #ddd8d1;
+  --border: rgba(255, 255, 255, 0.16);
+  color: var(--surface);
+}
+
+.member-game-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.member-game-card {
+  display: grid;
+  grid-template-columns: 108px 96px 236px minmax(0, 1fr);
+  gap: 20px;
+  align-items: center;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-left: 4px solid #b1a79c;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.member-game-card.member-game-win {
+  border-left-color: #648eec;
+}
+
+.member-game-card.member-game-loss {
+  border-left-color: #d86e80;
+}
+
+.member-game-unknown {
+  background: var(--surface);
+}
+
+.member-game-overview,
+.member-game-champion,
+.member-game-performance {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+}
+
+.member-game-result {
+  font-size: 1rem;
+}
+
+.member-game-overview time {
+  white-space: nowrap;
+  font-size: 0.78rem;
+}
+
+.member-game-detail {
+  margin-top: 6px;
+  font-size: 0.78rem;
+}
+
+.member-game-card :focus-visible {
+  outline-color: currentColor;
+}
+
+.member-game-champion {
+  align-items: center;
+  text-align: center;
+}
+
+.member-game-portrait {
+  position: relative;
+  margin-bottom: 4px;
+}
+
+.member-game-portrait .game-asset-icon {
+  border-radius: 50%;
+}
+
+.member-game-level {
+  position: absolute;
+  right: -3px;
+  bottom: -4px;
+  min-width: 23px;
+  padding: 2px 4px;
+  border-radius: 10px;
+  background: #171c28;
+  color: #fffdf9;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-align: center;
+}
+
+.member-game-champion-name {
+  overflow-wrap: anywhere;
+}
+
+.member-game-kda {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.member-game-note {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.member-game-performance .game-item-slots {
+  margin-top: 8px;
+  gap: 3px;
+}
+
+.member-game-warning {
+  font-size: 0.75rem;
+}
+
+.member-game-rosters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+  border-left: 1px solid var(--border);
+  padding-left: 16px;
+}
+
+.member-game-team {
+  min-width: 0;
+}
+
+.member-game-team h3 {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 400;
+}
+
+.member-game-team ul {
+  display: grid;
+  gap: 3px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.member-game-team li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.member-game-player {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 0.75rem;
+}
+
+.member-game-self {
+  font-weight: 700;
+}
+
+@media (max-width: 900px) {
+  .member-game-card {
+    grid-template-columns: 108px 96px minmax(0, 1fr);
+  }
+
+  .member-game-rosters {
+    grid-column: 1 / -1;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    padding: 12px 0 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .member-game-card {
+    grid-template-columns: minmax(0, 1fr) 76px;
+    gap: 16px;
+    padding: 14px;
+  }
+
+  .member-game-performance {
+    grid-column: 1 / -1;
+  }
+}
+
 .table-scroll {
   overflow-x: auto;
+}
+
+.game-detail-table th,
+.game-detail-table td {
+  white-space: nowrap;
+}
+
+.game-champion,
+.game-item-slots {
+  display: inline-flex;
+  align-items: center;
+  vertical-align: middle;
+}
+
+.game-champion {
+  gap: 8px;
+}
+
+.game-item-slots {
+  gap: 4px;
+}
+
+.game-item-slots > :last-child {
+  margin-left: 6px;
+}
+
+.game-asset-icon {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 5px;
+  background: var(--surface-soft);
+  box-shadow: inset 0 0 0 1px var(--border);
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.game-asset-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.game-asset-empty {
+  opacity: 0.5;
 }
 
 /* Badges */

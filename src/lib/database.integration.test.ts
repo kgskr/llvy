@@ -39,6 +39,7 @@ import { createTestSession } from "@/test/auth";
 import { countGames, getGameDetail, listGames } from "./games";
 import { formatKoreaDateInput } from "./game-date";
 import { ingestReplay } from "./ingest";
+import { getGameDetailReadModel } from "./read-model";
 import {
   createMember,
   linkAccount,
@@ -161,6 +162,41 @@ describe("stored migrations and replay ingestion", () => {
       expect(storedParticipants[0].rawStats).toHaveProperty("SKIN", "Ahri");
     },
   );
+
+  it("projects final item slots from retained replay stats without exposing raw data", async () => {
+    const original = await ingest(
+      replayBytes({
+        players: [
+          replayPlayer({
+            ITEM0: "3158",
+            ITEM1: 1038,
+            ITEM2: 1038,
+            ITEM3: "0",
+            ITEM4: "bad",
+            ITEM6: "3340",
+          }),
+        ],
+      }),
+    );
+    const detail = await getGameDetail(original.gameId);
+    expect(detail?.participants[0].items).toEqual([
+      3158,
+      1038,
+      1038,
+      0,
+      null,
+      null,
+      3340,
+    ]);
+    expect(detail?.participants[0]).not.toHaveProperty("rawStats");
+    mocks.token = (await createTestSession("viewer")).token;
+    const projected = (await getGameDetailReadModel(original.gameId)).game;
+    expect(projected?.participants[0].items).toEqual(
+      detail?.participants[0].items,
+    );
+    expect(projected?.participants[0]).not.toHaveProperty("rawStats");
+    expect(projected?.participants[0]).not.toHaveProperty("birthYear");
+  });
 
   it("returns the original game for the same bytes without rewriting metadata", async () => {
     const original = await ingest();

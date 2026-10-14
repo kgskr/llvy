@@ -1,12 +1,23 @@
 import "server-only";
 
-import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import { gameParticipants, games, members, riotAccounts } from "@/db/schema";
 import { isUuid } from "@/lib/validation";
+import { readParticipantLoadout } from "@/lib/participant-loadout";
 
 export type MemberGameResult = "win" | "loss" | "unknown";
+
+export type MemberHistoryParticipant = {
+  id: string;
+  team: number | null;
+  position: string | null;
+  champion: string | null;
+  gameName: string;
+  tagLine: string;
+  isMember: boolean;
+};
 
 export type MemberHistoryGame = {
   id: string;
@@ -20,6 +31,10 @@ export type MemberHistoryGame = {
   assists: number | null;
   result: MemberGameResult;
   ambiguous: boolean;
+  gameVersion: string | null;
+  level: number | null;
+  items: (number | null)[];
+  participants: MemberHistoryParticipant[];
 };
 
 export type MemberHistoryStats = {
@@ -90,6 +105,7 @@ export async function getMemberHistory(
           else ${games.playedAtSource} end`.as("effective_played_at_source"),
         uploadedAt: games.uploadedAt,
         durationMs: games.durationMs,
+        gameVersion: games.gameVersion,
         champion: sql<string | null>`case when count(*) = 1
           then max(${gameParticipants.champion}) else null end`.as("champion"),
         position: sql<string | null>`case when count(*) = 1
@@ -162,6 +178,7 @@ export async function getMemberHistory(
           playedAt: memberGames.playedAt,
           playedAtSource: memberGames.playedAtSource,
           durationMs: memberGames.durationMs,
+          gameVersion: memberGames.gameVersion,
           champion: memberGames.champion,
           position: memberGames.position,
           kills: memberGames.kills,
@@ -223,11 +240,75 @@ export async function getMemberHistory(
         .orderBy(desc(sql`count(*)`), asc(memberGames.position)),
     ]);
 
+  // Enrich only the paginated games, once. Never load whole raw_stats objects
+  // or call getGameDetail for each row; even other players' loadouts stay in DB.
+  const pageParticipants =
+    history.length === 0
+      ? []
+      : await db
+          .select({
+            id: gameParticipants.id,
+            gameId: gameParticipants.gameId,
+            team: gameParticipants.team,
+            position: gameParticipants.position,
+            champion: gameParticipants.champion,
+            gameName: riotAccounts.gameName,
+            tagLine: riotAccounts.tagLine,
+            isMember: sql<boolean>`coalesce(${riotAccounts.memberId} = ${memberId}, false)`,
+            loadout: sql<unknown>`case when ${riotAccounts.memberId} = ${memberId}
+        then jsonb_build_object(
+          'LEVEL', ${gameParticipants.rawStats}->'LEVEL',
+          'ITEM0', ${gameParticipants.rawStats}->'ITEM0',
+          'ITEM1', ${gameParticipants.rawStats}->'ITEM1',
+          'ITEM2', ${gameParticipants.rawStats}->'ITEM2',
+          'ITEM3', ${gameParticipants.rawStats}->'ITEM3',
+          'ITEM4', ${gameParticipants.rawStats}->'ITEM4',
+          'ITEM5', ${gameParticipants.rawStats}->'ITEM5',
+          'ITEM6', ${gameParticipants.rawStats}->'ITEM6'
+        ) else null end`,
+          })
+          .from(gameParticipants)
+          .innerJoin(
+            riotAccounts,
+            eq(gameParticipants.riotAccountId, riotAccounts.id),
+          )
+          .where(
+            inArray(
+              gameParticipants.gameId,
+              history.map((game) => game.id),
+            ),
+          )
+          .orderBy(asc(gameParticipants.id));
+  const byGame = new Map<string, typeof pageParticipants>();
+  for (const participant of pageParticipants) {
+    const group = byGame.get(participant.gameId) ?? [];
+    group.push(participant);
+    byGame.set(participant.gameId, group);
+  }
+
   return {
     member,
     accounts,
     stats,
-    games: history,
+    games: history.map((game) => {
+      const participants = byGame.get(game.id) ?? [];
+      const own = participants.filter((participant) => participant.isMember);
+      const loadout =
+        !game.ambiguous && own.length === 1 ? own[0].loadout : null;
+      return {
+        ...game,
+        ...readParticipantLoadout(loadout),
+        participants: participants.map((participant) => ({
+          id: participant.id,
+          team: participant.team,
+          position: participant.position,
+          champion: participant.champion,
+          gameName: participant.gameName,
+          tagLine: participant.tagLine,
+          isMember: participant.isMember,
+        })),
+      };
+    }),
     championStats,
     positionStats,
   };

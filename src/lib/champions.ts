@@ -8,7 +8,7 @@ const DDRAGON = "https://ddragon.leagueoflegends.com";
 const DAY_SECONDS = 60 * 60 * 24;
 const LOOKUP_TIMEOUT_MS = 2_000;
 
-type ChampionMap = Map<string, string>;
+type ChampionMap = Map<string, { name: string; iconUrl?: string }>;
 let memo: { map: ChampionMap; expiresAt: number } | null = null;
 let pending: Promise<ChampionMap> | null = null;
 
@@ -44,7 +44,14 @@ async function fetchChampionMap(signal: AbortSignal): Promise<ChampionMap> {
       typeof champion.name === "string" &&
       champion.name !== ""
     ) {
-      map.set(champion.id, champion.name);
+      const image = isRecord(champion.image) ? champion.image.full : undefined;
+      map.set(champion.id, {
+        name: champion.name,
+        iconUrl:
+          typeof image === "string" && /^[A-Za-z0-9_-]+\.png$/.test(image)
+            ? `${DDRAGON}/cdn/${version}/img/champion/${image}`
+            : undefined,
+      });
     }
   }
   return map;
@@ -95,7 +102,20 @@ export async function resolveChampionNames(
   const map = await loadChampionMap();
   const result = new Map<string, string>();
   for (const name of internalNames) {
-    result.set(name, map.get(name) ?? name);
+    result.set(name, map.get(name)?.name ?? name);
+  }
+  return result;
+}
+
+/** Portrait URLs from the same cached catalog used for display names. */
+export async function resolveChampionPortraits(
+  internalNames: string[],
+): Promise<Map<string, string>> {
+  const map = await loadChampionMap();
+  const result = new Map<string, string>();
+  for (const name of internalNames) {
+    const iconUrl = map.get(name)?.iconUrl;
+    if (iconUrl) result.set(name, iconUrl);
   }
   return result;
 }
