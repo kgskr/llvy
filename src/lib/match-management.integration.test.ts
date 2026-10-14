@@ -463,12 +463,22 @@ describe("combined member history", () => {
         expect(game.participants).toHaveLength(2);
         expect(game.participants.filter((p) => p.isMember)).toHaveLength(1);
         expect(game.participants.map((p) => p.team).sort()).toEqual([100, 200]);
+        expect(game.participants.find((p) => p.isMember)).toMatchObject({
+          memberId,
+          memberName: "카드 모임원",
+        });
+        expect(game.participants.find((p) => !p.isMember)).toMatchObject({
+          memberId: null,
+          memberName: null,
+        });
         for (const participant of game.participants) {
           expect(Object.keys(participant).sort()).toEqual([
             "champion",
             "gameName",
             "id",
             "isMember",
+            "memberId",
+            "memberName",
             "position",
             "tagLine",
             "team",

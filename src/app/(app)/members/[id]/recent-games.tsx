@@ -80,6 +80,19 @@ function Roster({
                   : undefined;
                 const name =
                   champion?.name ?? player.champion ?? "챔피언 정보 없음";
+                const linked = player.memberId && player.memberName !== null;
+                const displayName = linked
+                  ? player.memberName
+                  : riotId(player.gameName, player.tagLine);
+                const title = `${displayName} · ${name} · ${positionLabel(player.position)}`;
+                const label = (
+                  <>
+                    {displayName}
+                    {player.isMember ? (
+                      <span className="sr-only"> (현재 모임원)</span>
+                    ) : null}
+                  </>
+                );
                 return (
                   <li
                     key={player.id}
@@ -90,15 +103,20 @@ function Roster({
                       label={`${name} · ${positionLabel(player.position)}`}
                       size={20}
                     />
-                    <span
-                      className="member-game-player"
-                      title={`${riotId(player.gameName, player.tagLine)} · ${name} · ${positionLabel(player.position)}`}
-                    >
-                      {player.gameName}
-                      {player.isMember ? (
-                        <span className="sr-only"> (현재 모임원)</span>
-                      ) : null}
-                    </span>
+                    {linked ? (
+                      <Link
+                        className="member-game-player"
+                        href={`/members/${player.memberId}`}
+                        prefetch={false}
+                        title={title}
+                      >
+                        {label}
+                      </Link>
+                    ) : (
+                      <span className="member-game-player" title={title}>
+                        {label}
+                      </span>
+                    )}
                   </li>
                 );
               })}

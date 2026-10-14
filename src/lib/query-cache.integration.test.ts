@@ -330,11 +330,11 @@ describe.skipIf(!testUrl)(
         false,
       );
       const before = (await dataKeys()).filter((key) =>
-        key.includes(":member-history-v3:"),
+        key.includes(":member-history-v4:"),
       );
       await getMemberHistoryReadModel(member.id, 1, 20);
       expect(
-        (await dataKeys()).filter((key) => key.includes(":member-history-v3:")),
+        (await dataKeys()).filter((key) => key.includes(":member-history-v4:")),
       ).toEqual(before);
       await getGameListReadModel(10, "999999");
       const listKeys = (await dataKeys()).filter((key) =>
@@ -942,12 +942,26 @@ describe.skipIf(!testUrl)(
         { query: "member-history", role: "owner", args: [member.id, 25, 0] },
         async () => ({ legacy: true }),
       );
+      await cachedQuery(
+        {
+          query: "member-history-v3",
+          role: "owner",
+          args: [member.id, 25, 0],
+          policy: "page",
+        },
+        async () => [{ legacy: true }],
+        await prepareCache(["accounts", "history"]),
+      );
       const initial = await getMemberHistoryReadModel(member.id);
       expect(initial.history?.games[0]).toMatchObject({
         level: 17,
         items: [3158, null, null, null, null, null, null],
       });
       expect(initial.history?.games[0].participants).toHaveLength(1);
+      expect(initial.history?.games[0].participants[0]).toMatchObject({
+        memberId: member.id,
+        memberName: member.name,
+      });
       const query = vi.spyOn(postgres, "query");
       try {
         expect(await getMemberHistoryReadModel(member.id)).toEqual(initial);
@@ -958,11 +972,72 @@ describe.skipIf(!testUrl)(
         query.mockRestore();
       }
       const key = (await dataKeys()).find((key) =>
-        key.includes(":member-history-v3:"),
+        key.includes(":member-history-v4:"),
       )!;
       const stored = (await redis.get(key))!;
-      expect(stored).not.toMatch(/rawStats|PUUID|private-roster/);
+      expect(stored).not.toMatch(/rawStats|PUUID|private-roster|birthYear/);
       expect(await redis.ttl(key)).toBeGreaterThanOrEqual(58);
+    });
+
+    it("refreshes other members' roster names and links without invalidating history aggregates on rename", async () => {
+      const { member, game } = await seed();
+      const [other] = await db
+        .insert(members)
+        .values({ name: "상대 모임원", birthYear: 1999 })
+        .returning();
+      const [account] = await db
+        .insert(riotAccounts)
+        .values({
+          memberId: other.id,
+          puuid: randomUUID(),
+          gameName: "상대닉네임",
+          tagLine: "KR2",
+        })
+        .returning();
+      const [participant] = await db
+        .insert(gameParticipants)
+        .values({ gameId: game.id, riotAccountId: account.id, team: 200 })
+        .returning();
+      const readOther = async () =>
+        (
+          await getMemberHistoryReadModel(member.id)
+        ).history?.games[0].participants.find(
+          (player) => player.id === participant.id,
+        );
+      expect(await readOther()).toMatchObject({
+        memberId: other.id,
+        memberName: "상대 모임원",
+        isMember: false,
+      });
+      await updateMember(other.id, "수정한 이름", 1999);
+      const query = vi.spyOn(postgres, "query");
+      expect(await readOther()).toMatchObject({
+        memberId: other.id,
+        memberName: "수정한 이름",
+      });
+      expect(query.mock.calls.some(([sql]) => sql.includes("avg("))).toBe(
+        false,
+      );
+      query.mockRestore();
+      await unlinkAccount(account.id);
+      expect(await readOther()).toMatchObject({
+        memberId: null,
+        memberName: null,
+        gameName: "상대닉네임",
+        tagLine: "KR2",
+      });
+      await linkAccount(account.id, other.id);
+      expect(await readOther()).toMatchObject({
+        memberId: other.id,
+        memberName: "수정한 이름",
+      });
+      await deleteMember(other.id);
+      expect(await readOther()).toMatchObject({
+        memberId: null,
+        memberName: null,
+        gameName: "상대닉네임",
+        tagLine: "KR2",
+      });
     });
 
     it("isolates old detail cache entries and reuses projected item slots without raw stats", async () => {

@@ -57,6 +57,30 @@ it("renders the member loadout, both ordered rosters and neutral outcome labels"
   expect(html).toContain(`href="/games/${game.id}"`);
 });
 
+it("links member names in both teams and leaves unlinked Riot IDs as text", () => {
+  const game = memberGameFixture();
+  const html = renderToStaticMarkup(
+    <RecentGames games={[game]} assetsByVersion={assets} isAdmin={false} />,
+  );
+  const links = html.match(/<a\b[^>]*href="\/members\/[^>]*>.*?<\/a>/g) ?? [];
+  expect(links).toHaveLength(2);
+  expect(links[0]).toContain(
+    `href="/members/${game.participants[2].memberId}"`,
+  );
+  expect(links[0]).toContain(">김민수<span");
+  expect(links[0]).toContain("현재 모임원");
+  expect(links[1]).toContain(
+    `href="/members/${game.participants[8].memberId}"`,
+  );
+  expect(links[1]).toContain(">이서연</a>");
+  expect(html).not.toContain("오늘도 즐겁게");
+  expect(html).not.toContain("파란 바다");
+  expect(html).toMatch(
+    /<span class="member-game-player"[^>]*>구름 위 산책#KR1<\/span>/,
+  );
+  expect(html).not.toMatch(/href="\/members\/(?:null|undefined)"/);
+});
+
 it.each([false, true])(
   "retains ambiguous warnings, missing stats and unknown teams (admin: %s)",
   (isAdmin) => {

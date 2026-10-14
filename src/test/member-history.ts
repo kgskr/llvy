@@ -50,6 +50,11 @@ export function memberGameFixture(
       champion,
       gameName: names[index],
       tagLine: "KR1",
+      memberId:
+        index === 2 || index === 8
+          ? `00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`
+          : null,
+      memberName: index === 2 ? "김민수" : index === 8 ? "이서연" : null,
       isMember: index === 2,
     })),
     ...overrides,

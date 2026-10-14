@@ -26,6 +26,13 @@ Each recent-game card SHALL display outcome, calendar date, duration, champion p
 - **WHEN** level, item, champion, team, or counter data is missing, or multiple linked accounts played in the same game
 - **THEN** unavailable personal data is not invented, the existing account-link warning remains available, and the roster still displays all stored participants
 
+#### Scenario: Linked and unlinked roster participants
+
+- **WHEN** a recent-game roster contains linked and unlinked Riot accounts
+- **THEN** linked participants display their current member name linked to `/members/{memberId}`, with automatic prefetch disabled
+- **AND** unlinked participants display their full Riot ID without a member link
+- **AND** member renames, link changes, and member deletion invalidate the roster's cached identity without adding per-participant queries
+
 ### Requirement: Batch recent-game enrichment by page
 
 The system SHALL fetch additional participant information with at most one database query for the current page's game IDs, after pagination. Empty pages SHALL skip that query. The response and role-specific cache SHALL omit raw replay objects, PUUIDs, birth years of roster participants, and unneeded participant statistics. Full-history aggregates SHALL remain independent of pagination. A new cache identity SHALL separate enriched results from the earlier data shape.

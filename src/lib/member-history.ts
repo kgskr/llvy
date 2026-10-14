@@ -16,6 +16,8 @@ export type MemberHistoryParticipant = {
   champion: string | null;
   gameName: string;
   tagLine: string;
+  memberId: string | null;
+  memberName: string | null;
   isMember: boolean;
 };
 
@@ -249,6 +251,8 @@ export async function getMemberHistoryPage(
             champion: gameParticipants.champion,
             gameName: riotAccounts.gameName,
             tagLine: riotAccounts.tagLine,
+            memberId: members.id,
+            memberName: members.name,
             isMember: sql<boolean>`coalesce(${riotAccounts.memberId} = ${memberId}, false)`,
             loadout: sql<unknown>`case when ${riotAccounts.memberId} = ${memberId}
         then jsonb_build_object(
@@ -267,6 +271,7 @@ export async function getMemberHistoryPage(
             riotAccounts,
             eq(gameParticipants.riotAccountId, riotAccounts.id),
           )
+          .leftJoin(members, eq(riotAccounts.memberId, members.id))
           .where(
             inArray(
               gameParticipants.gameId,
@@ -295,6 +300,8 @@ export async function getMemberHistoryPage(
         champion: participant.champion,
         gameName: participant.gameName,
         tagLine: participant.tagLine,
+        memberId: participant.memberId,
+        memberName: participant.memberName,
         isMember: participant.isMember,
       })),
     };

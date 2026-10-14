@@ -110,7 +110,7 @@ export async function getMemberHistoryReadModel(
   if (!current) return { role, history: null };
   limit = Number.isSafeInteger(limit) && limit >= 0 ? Math.min(limit, 100) : 25;
   offset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
-  const context = await prepareCache(["accounts", "history"]);
+  const context = await prepareCache(["members", "accounts", "history"]);
   const [accounts, aggregate, games] = await Promise.all([
     cachedQuery(
       { query: "member-accounts-v3", role, args: [id], policy: "accounts" },
@@ -124,7 +124,7 @@ export async function getMemberHistoryReadModel(
     ),
     cachedQuery(
       {
-        query: "member-history-v3",
+        query: "member-history-v4",
         role,
         args: [id, limit, offset],
         policy: "page",
