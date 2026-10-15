@@ -20,20 +20,28 @@ The system SHALL calculate the highest same-team win rate, highest opposing-team
 - **WHEN** a pair has three qualifying games with unknown outcomes
 - **THEN** it may appear in frequency categories but not win-rate categories
 - **WHEN** a pair has three decided losses
-- **THEN** its zero-percent win rate remains a valid candidate
+- **THEN** its zero-percent win rate remains a valid aggregate candidate
 
 ### Requirement: Display relationship blocks below positions
 
-The member-detail page SHALL show up to four blocks directly below ‘플레이 포지션’ and above linked accounts, in the order ‘같은 팀 최고 승률’, ‘상대 팀 최고 승률’, ‘가장 많이 함께한 팀원’, ‘가장 많이 만난 상대’. Blocks SHALL share one horizontal row, allowing scrolling within that row on narrow screens. Each block SHALL show the member name linked to `/members/{memberId}` with prefetch disabled, its primary metric, meeting count, and outcomes. Missing categories MUST produce no block or placeholder. If every category is missing, the entire relationship region and its explanatory note MUST be omitted.
+The member-detail page SHALL show up to four blocks directly below ‘플레이 포지션’ and above linked accounts, in the order ‘가장 많이 함께한 팀원’, ‘가장 많이 만난 상대’, ‘같은 팀 최고 승률’, ‘상대 팀 최고 승률’. The presentation layer MUST omit a win-rate block unless its unrounded win rate is greater than 50 percent, without changing aggregate queries or cached results. Frequency blocks SHALL remain eligible regardless of win rate. Blocks SHALL share one horizontal row, allowing scrolling within that row on narrow screens. Each block SHALL show the member name linked to `/members/{memberId}` with prefetch disabled, its primary metric, meeting count, and outcomes. Missing or filtered categories MUST produce no block or placeholder. If no category remains visible, the entire relationship region and its explanatory note MUST be omitted.
 
 #### Scenario: Four, some, or no categories
 
-- **WHEN** all categories have eligible candidates
+- **WHEN** all categories have eligible candidates and both win rates exceed 50 percent
 - **THEN** four blocks appear in one row below positions
 - **WHEN** only some categories have candidates
 - **THEN** only those blocks are created, in the same relative order
-- **WHEN** no category has a candidate
+- **WHEN** no category has a visible candidate after presentation filtering
 - **THEN** no relationship region, empty block, or empty-state message is rendered
+
+#### Scenario: Hide low win rates only in presentation
+
+- **WHEN** either highest win rate is 50 percent or lower, or has no decided value
+- **THEN** its win-rate block is omitted while frequency blocks remain visible on the left
+- **AND** the aggregate and cache retain the original statistics
+- **WHEN** a highest win rate is greater than 50 percent
+- **THEN** its block is shown after the frequency blocks
 
 ### Requirement: Cache relationship summaries with current identities
 
