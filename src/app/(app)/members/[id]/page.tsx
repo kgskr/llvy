@@ -206,7 +206,18 @@ export default async function MemberHistoryPage({
           <ul className="account-list">
             {accounts.map((account) => (
               <li key={account.id}>
-                {riotId(account.gameName, account.tagLine)}
+                {account.tagLine ? (
+                  <a
+                    href={`https://op.gg/ko/lol/summoners/kr/${encodeURIComponent(account.gameName)}-${encodeURIComponent(account.tagLine)}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`${riotId(account.gameName, account.tagLine)} OP.GG 전적 보기 (새 탭)`}
+                  >
+                    {riotId(account.gameName, account.tagLine)}
+                  </a>
+                ) : (
+                  riotId(account.gameName, account.tagLine)
+                )}
               </li>
             ))}
           </ul>

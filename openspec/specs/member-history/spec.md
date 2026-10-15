@@ -22,6 +22,21 @@ The system SHALL provide authenticated member-list and member-detail pages. A de
 - **WHEN** the member identifier is invalid or absent
 - **THEN** the page responds as not found
 
+### Requirement: Link Riot accounts to OP.GG
+
+Each linked Riot account with a tag line in the member-detail page SHALL display its existing `gameName#tagLine` label as a link to `https://op.gg/ko/lol/summoners/kr/{gameName}-{tagLine}`, with both values URL-encoded independently. The link SHALL open in a new tab with `noopener noreferrer`, and its accessible name SHALL identify OP.GG and the new-tab behavior. Accounts without a tag line SHALL remain plain text because their complete Riot ID is unavailable.
+
+#### Scenario: Open a linked account's match history
+
+- **WHEN** a user selects the linked account `치코리타ex#123`
+- **THEN** its Korean OP.GG summoner page opens in a new tab
+- **AND** Korean characters and spaces in account names are preserved through URL encoding
+
+#### Scenario: Legacy account without a tag line
+
+- **WHEN** a linked account has no stored tag line
+- **THEN** the page displays its name without an OP.GG link
+
 ### Requirement: Color recent-game rows by outcome
 
 The member-detail recent-game list SHALL use a dark blue background (`#28344E`) for winning card rows and a dark red background (`#59343B`) for losing card rows. Decided rows SHALL use readable neutral text, and result labels SHALL appear as plain text without a separate colored badge. Unknown results SHALL retain a neutral background. Hovering a decided row SHALL retain its outcome background.
