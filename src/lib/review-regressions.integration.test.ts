@@ -289,7 +289,7 @@ it("rejects bad metadata and filenames while accepting legitimate emoji/combinin
       actor: (await getSession())!,
     }),
   ).rejects.toBeInstanceOf(RoflParseError);
-  for (const name of ["김😀길수", "Cafe\u0301"]) {
+  for (const name of ["가😀나다", "Cafe\u0301"]) {
     expect(
       parseRofl(
         replayBytes({ players: [replayPlayer({ RIOT_ID_GAME_NAME: name })] }),

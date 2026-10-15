@@ -95,7 +95,7 @@ const GAME_ID = randomUUID();
 const ACCOUNT = { id: randomUUID(), gameName: "RiotNickname", tagLine: "KR1" };
 const MEMBER = {
   id: MEMBER_ID,
-  name: "김길수",
+  name: "가나다",
   birthYear: 1991,
   accounts: [ACCOUNT],
 };
@@ -177,7 +177,7 @@ describe("privacy-safe member projection", () => {
     const projected = projectMember(MEMBER, "viewer");
     expect(projected).not.toHaveProperty("birthYear");
     expect(projected.name).toBe(MEMBER.name);
-    expect(MEMBER.name).toBe("김길수");
+    expect(MEMBER.name).toBe("가나다");
     expect(MEMBER.birthYear).toBe(1991);
     for (const role of ["admin", "owner"] as const) {
       expect(projectMember(MEMBER, role)).toEqual(MEMBER);
@@ -192,7 +192,7 @@ describe("privacy-safe member projection", () => {
     for (const payload of [members, history, game]) {
       const serialized = JSON.stringify(payload);
       expect(serialized).toContain(MEMBER.name);
-      expect(serialized).not.toContain("김*수");
+      expect(serialized).not.toContain("가*다");
       expect(serialized).not.toContain("birthYear");
       expect(serialized).not.toContain("1991");
       expect(serialized).not.toContain(mocks.token);
@@ -278,7 +278,7 @@ describe("read model authorization and page privacy", () => {
       );
       for (const html of [members, history, game]) {
         expect(html).toContain(MEMBER.name);
-        expect(html).not.toContain("김*수");
+        expect(html).not.toContain("가*다");
         expect(html).toContain(ACCOUNT.gameName);
       }
       expect(members.includes("1991")).toBe(privileged);
@@ -328,7 +328,7 @@ describe("read model authorization and page privacy", () => {
         searchParams: Promise.resolve({}),
       }),
     );
-    expect(html).toContain("김길수의 전적");
+    expect(html).toContain("가나다의 전적");
     expect(html).toContain("2026. 10. 2.");
     expect(html).toContain("20분 00초");
     expect(html).not.toContain("오후");

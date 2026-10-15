@@ -79,7 +79,7 @@ const MEMBER_ID = "c1c1eb6e-1ef5-48e1-95da-51454965df91";
 const audit = {
   id: "audit-id",
   occurredAt: new Date("2026-10-05T00:00:00Z"),
-  actorName: "김길수",
+  actorName: "가나다",
   actorRole: "admin",
   actorMemberId: MEMBER_ID,
   actorCredentialId: "credential-id",
@@ -87,8 +87,8 @@ const audit = {
   targetType: "member",
   targetId: MEMBER_ID,
   result: "success",
-  before: { name: "김길수", birthYear: 1995 },
-  after: { name: "김수정", birthYear: null },
+  before: { name: "가나다", birthYear: 1995 },
+  after: { name: "라마바", birthYear: null },
   requestId: "request-id",
 };
 
@@ -98,7 +98,7 @@ beforeEach(() => {
   mocks.listMembers.mockResolvedValue([
     {
       id: MEMBER_ID,
-      name: "김길수",
+      name: "가나다",
       birthYear: 1995,
       accounts: [],
       administrator: false,
@@ -108,7 +108,7 @@ beforeEach(() => {
   mocks.countMembers.mockResolvedValue(1);
   mocks.countUnlinked.mockResolvedValue(0);
   mocks.listMemberOptions.mockResolvedValue([
-    { id: MEMBER_ID, name: "김길수" },
+    { id: MEMBER_ID, name: "가나다" },
   ]);
   mocks.listAssignments.mockResolvedValue([]);
   mocks.listAuditLogs.mockResolvedValue([audit]);
@@ -345,12 +345,12 @@ describe("owner-only audit page", () => {
       await AuditPage({ searchParams: Promise.resolve({}) }),
     );
     for (const text of [
-      "김길수",
+      "가나다",
       "관리자",
       "모임원 정보 수정",
       "성공",
       "1995 → 없음",
-      "김길수 → 김수정",
+      "가나다 → 라마바",
       "request-id",
       "credential-id",
     ]) {

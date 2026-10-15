@@ -28,7 +28,7 @@ const account = (n: number) => ({
 describe("search input contract", () => {
   it("normalizes NFC, surrounding spaces and case while treating name punctuation literally", () => {
     expect(normalizeSearchInput("  CAFE\u0301  ")).toBe("café");
-    for (const value of ["김#이#박", "%_", "<script>", "😀", "김 길수"])
+    for (const value of ["김#이#박", "%_", "<script>", "😀", "가 나다"])
       expect(normalizeSearchInput(value)).toBe(value);
     expect(normalizeSearchInput("😀".repeat(100))).toBe("😀".repeat(100));
     expect(normalizeNicknamePrefix(" 가 # KR ")).toBe("가#kr");

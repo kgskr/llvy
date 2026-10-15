@@ -121,17 +121,17 @@ describe("unified member search against the test database", () => {
   it.each(["viewer", "admin", "owner"] as const)(
     "returns full names and at most two previews without private fields for %s",
     async (role) => {
-      const m = await member("김길수");
+      const m = await member("가나다");
       await account(m.id, "다", "KR1", "none");
       await account(m.id, "나", "KR1", "excluded");
       await account(m.id, "가");
       mocks.token = (await createTestSession(role)).token;
       const select = vi.spyOn(db, "select");
-      expect(await autocompleteSearch("김")).toEqual([
+      expect(await autocompleteSearch("가나")).toEqual([
         {
           kind: "member",
           id: m.id,
-          name: "김길수",
+          name: "가나다",
           accounts: [
             { gameName: "가", tagLine: "KR1" },
             { gameName: "나", tagLine: "KR1" },
@@ -143,9 +143,9 @@ describe("unified member search against the test database", () => {
           !(fields && "account" in fields && fields.account === authAccounts),
       );
       expect(business).toHaveLength(2);
-      const text = JSON.stringify(await resolve("김길수"));
+      const text = JSON.stringify(await resolve("가나다"));
       expect(text).not.toMatch(/birthYear|discord|puuid|1987/);
-      expect(await resolve("김길수")).toEqual({
+      expect(await resolve("가나다")).toEqual({
         kind: "member",
         memberId: m.id,
       });
@@ -289,9 +289,9 @@ describe("unified member search against the test database", () => {
   it("requires current sessions even for empty/invalid input and after session revocation", async () => {
     const session = await createTestSession("viewer");
     mocks.token = session.token;
-    await autocompleteSearch("김");
+    await autocompleteSearch("가나");
     await db.delete(authSessions).where(eq(authSessions.id, session.sessionId));
-    for (const value of ["김", "", "\ud800"]) {
+    for (const value of ["가나", "", "\ud800"]) {
       await expect(autocompleteSearch(value)).rejects.toBeInstanceOf(
         UnauthorizedError,
       );
@@ -299,7 +299,7 @@ describe("unified member search against the test database", () => {
     }
   });
   it("does not turn either source's database failure into partial success or a missing result", async () => {
-    await member("김길수");
+    await member("가나다");
     const select = db.select.bind(db);
     const spy = vi.spyOn(db, "select");
     for (const column of ["name", "gameName"]) {
@@ -312,10 +312,10 @@ describe("unified member search against the test database", () => {
           throw new Error(`failed ${column}`);
         return select(fields);
       });
-      await expect(autocompleteSearch("김")).rejects.toThrow(
+      await expect(autocompleteSearch("가나")).rejects.toThrow(
         `failed ${column}`,
       );
-      await expect(resolve("김길수")).rejects.toThrow(`failed ${column}`);
+      await expect(resolve("가나다")).rejects.toThrow(`failed ${column}`);
     }
   });
 });

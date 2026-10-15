@@ -56,17 +56,17 @@ describe("member administration actions", () => {
   it("creates a validated member and returns success feedback", async () => {
     const result = await createMemberAction(
       null,
-      form({ name: "  길수  ", birthYear: "1995" }),
+      form({ name: "  나다  ", birthYear: "1995" }),
     );
     expect(result?.status).toBe("success");
-    expect(mocks.createMember).toHaveBeenCalledWith("길수", 1995);
+    expect(mocks.createMember).toHaveBeenCalledWith("나다", 1995);
     expect(mocks.revalidatePath).toHaveBeenCalledWith("/admin");
   });
 
   it("rejects malformed birth years without a database write", async () => {
     const result = await createMemberAction(
       null,
-      form({ name: "길수", birthYear: "1995junk" }),
+      form({ name: "나다", birthYear: "1995junk" }),
     );
     expect(result?.status).toBe("error");
     expect(mocks.createMember).not.toHaveBeenCalled();
@@ -75,12 +75,12 @@ describe("member administration actions", () => {
   it("updates the existing member identity and invalidates historical detail pages", async () => {
     const result = await updateMemberAction(
       null,
-      form({ memberId: MEMBER_ID, name: "길수 수정", birthYear: "" }),
+      form({ memberId: MEMBER_ID, name: "나다 수정", birthYear: "" }),
     );
     expect(result?.status).toBe("success");
     expect(mocks.updateMember).toHaveBeenCalledWith(
       MEMBER_ID,
-      "길수 수정",
+      "나다 수정",
       null,
     );
     expect(mocks.createMember).not.toHaveBeenCalled();
@@ -95,7 +95,7 @@ describe("member administration actions", () => {
       (
         await updateMemberAction(
           null,
-          form({ memberId: MEMBER_ID, name: "길수" }),
+          form({ memberId: MEMBER_ID, name: "나다" }),
         )
       )?.status,
     ).toBe("error");
@@ -107,7 +107,7 @@ describe("member administration actions", () => {
       (
         await updateMemberAction(
           null,
-          form({ memberId: "invalid", name: "길수" }),
+          form({ memberId: "invalid", name: "나다" }),
         )
       )?.status,
     ).toBe("error");
@@ -149,7 +149,7 @@ describe("member administration actions", () => {
     const data = form({
       memberId: MEMBER_ID,
       accountId: ACCOUNT_ID,
-      name: "길수",
+      name: "나다",
       birthYear: "1995",
       confirmed: "yes",
     });
@@ -246,7 +246,7 @@ describe("member administration actions", () => {
     const log = vi.spyOn(console, "error").mockImplementation(() => undefined);
     mocks.createMember.mockRejectedValue(new Error("internal database detail"));
     try {
-      const result = await createMemberAction(null, form({ name: "길수" }));
+      const result = await createMemberAction(null, form({ name: "나다" }));
       expect(result?.status).toBe("error");
       expect(result?.message).not.toContain("internal database detail");
       expect(mocks.revalidatePath).not.toHaveBeenCalled();

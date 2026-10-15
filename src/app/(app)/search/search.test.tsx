@@ -58,7 +58,7 @@ describe("exact nickname search routes", () => {
         {
           kind: "member",
           id: MEMBER_ID,
-          name: "김길수<script>",
+          name: "가나다<script>",
           accounts: [{ gameName: "<script>x</script>", tagLine: "KR1" }],
         },
         {
@@ -74,7 +74,7 @@ describe("exact nickname search routes", () => {
         searchParams: Promise.resolve({ nickname: "<script>x</script>" }),
       }),
     );
-    expect(html).toContain("김길수&lt;script&gt;");
+    expect(html).toContain("가나다&lt;script&gt;");
     expect(html).toContain("이영희");
     expect(html).toContain(`href="/members/${MEMBER_ID}"`);
     expect(html).toContain("&lt;script&gt;x&lt;/script&gt;#KR1");
@@ -83,7 +83,7 @@ describe("exact nickname search routes", () => {
     expect(html).toContain("연결된 계정 없음");
     expect(html).toContain("22명");
     expect(html).toContain("nickname=%3Cscript%3Ex%3C%2Fscript%3E&amp;page=2");
-    expect(html).not.toContain("김*수");
+    expect(html).not.toContain("가*다");
   });
 
   it("does not disguise database outages as a missing-user result", async () => {

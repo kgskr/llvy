@@ -29,7 +29,7 @@ describe("authenticated nickname autocomplete API", () => {
         id: String(i),
         gameName: "한글닉네임",
         tagLine: String(i),
-        memberName: "김길수",
+        memberName: "가나다",
         birthYear: 1991,
       })),
     );
@@ -48,7 +48,7 @@ describe("authenticated nickname autocomplete API", () => {
       gameName: "한글닉네임",
       tagLine: "0",
     });
-    expect(JSON.stringify(body)).not.toContain("김길수");
+    expect(JSON.stringify(body)).not.toContain("가나다");
     expect(JSON.stringify(body)).not.toContain("birthYear");
   });
 
@@ -90,17 +90,17 @@ it("returns typed minimal member/account candidates for q", async () => {
   const member = {
     kind: "member",
     id: "11111111-1111-4111-8111-111111111111",
-    name: "김길수",
+    name: "가나다",
     accounts: [{ gameName: "한글", tagLine: "KR1" }],
   };
   mocks.unified.mockResolvedValue([
     { ...member, birthYear: 1991, discordUserId: "secret" },
   ]);
   const response = await GET(
-    new Request("http://localhost/api/search/autocomplete?q=김"),
+    new Request("http://localhost/api/search/autocomplete?q=가나"),
   );
   expect(await response.json()).toEqual({ suggestions: [member] });
-  expect(mocks.unified).toHaveBeenCalledWith("김");
+  expect(mocks.unified).toHaveBeenCalledWith("가나");
   expect(mocks.autocomplete).not.toHaveBeenCalled();
 });
 it.each(["q=a&q=b", "nickname=a&nickname=b", "q=&nickname=a"])(

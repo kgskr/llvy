@@ -3,19 +3,19 @@ import { isUuid, parsePageNumber, validateMemberInput } from "./validation";
 
 describe("member input validation", () => {
   it("trims names and accepts an optional birth year", () => {
-    expect(validateMemberInput("  길수  ", "1995", 2026)).toEqual({
+    expect(validateMemberInput("  나다  ", "1995", 2026)).toEqual({
       ok: true,
-      name: "길수",
+      name: "나다",
       birthYear: 1995,
     });
-    expect(validateMemberInput("길수", "", 2026)).toEqual({
+    expect(validateMemberInput("나다", "", 2026)).toEqual({
       ok: true,
-      name: "길수",
+      name: "나다",
       birthYear: null,
     });
-    expect(validateMemberInput("길수", null, 2026)).toEqual({
+    expect(validateMemberInput("나다", null, 2026)).toEqual({
       ok: true,
-      name: "길수",
+      name: "나다",
       birthYear: null,
     });
   });
@@ -23,12 +23,12 @@ describe("member input validation", () => {
   it.each(["1995.9", "1995junk", "-1", "1899", "2027", "1e3", "0x780", "NaN"])(
     "rejects invalid year %s instead of truncating it",
     (year) => {
-      expect(validateMemberInput("길수", year, 2026).ok).toBe(false);
+      expect(validateMemberInput("나다", year, 2026).ok).toBe(false);
     },
   );
 
   it.each(["1900", "2026"])("accepts boundary year %s", (year) => {
-    expect(validateMemberInput("길수", year, 2026).ok).toBe(true);
+    expect(validateMemberInput("나다", year, 2026).ok).toBe(true);
   });
 
   it.each(["", "   ", "가".repeat(81), null, new Blob(["name"])])(
@@ -39,7 +39,7 @@ describe("member input validation", () => {
   );
 
   it("rejects non-text form values for birth year", () => {
-    expect(validateMemberInput("길수", new Blob(["1995"]), 2026).ok).toBe(
+    expect(validateMemberInput("나다", new Blob(["1995"]), 2026).ok).toBe(
       false,
     );
   });

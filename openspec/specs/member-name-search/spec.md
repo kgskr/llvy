@@ -12,7 +12,7 @@ The authenticated landing SHALL provide one GET search form using `q` for member
 
 #### Scenario: Member name prefix
 
-- **WHEN** an authenticated user enters `김길` and a registered member is named `김길수`
+- **WHEN** an authenticated user enters `가나` and a registered member is named `가나다`
 - **THEN** autocomplete SHALL offer that member and preserve the original display name
 
 #### Scenario: Direct full-name search without JavaScript
