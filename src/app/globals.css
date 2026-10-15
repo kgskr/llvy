@@ -43,6 +43,9 @@ body {
 
 body {
   margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
@@ -63,8 +66,23 @@ a {
 }
 
 .app-shell {
-  min-height: 100vh;
+  flex: 1;
   padding: 48px 24px;
+}
+
+.site-legal {
+  width: 100%;
+  max-width: 1028px;
+  margin: 0 auto;
+  padding: 0 24px 32px;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.site-legal p {
+  margin: 0 0 8px;
 }
 
 .hero {

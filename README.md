@@ -48,3 +48,21 @@ npm run dev
 - [Redis 캐시](docs/redis.md)
 - [개발·테스트](docs/development.md)
 - [전체 문서](docs/README.md)
+
+## 라이선스
+
+프로젝트 기여자가 권리를 보유한 자체 코드와 문서는
+[PolyForm Noncommercial 1.0.0](LICENSE)에 따라 비상업적 사용·수정·재배포를 허용합니다.
+재배포할 때는 라이선스와 필수 고지를 유지해야 합니다. 상업적 이용을 일반적으로 허용하는
+라이선스는 아니며, 허용 목적과 비영리·교육·정부기관 등의 이용 범위는 라이선스 원문을 따릅니다.
+
+Required Notice: LLVY (https://github.com/kgskr/llvy)
+
+Riot Games 자료, Discord 로고, 외부 의존성·데이터 및 모임원이 제공한 배너 이미지는 이 라이선스의
+적용 대상에서 제외합니다. 배너는 LLVY에서 사용하도록 제공받았으며, 이 저장소가 제3자에게
+수정·재배포 권한을 부여하지는 않습니다. 자세한 범위와 출처는
+[외부 자료 및 권리 안내](THIRD_PARTY_NOTICES.md)를 참고하세요.
+
+LLVY는 Riot Games가 보증하거나 후원하는 서비스가 아닙니다. Riot Games 관련 자료와
+상표에는 [Riot Games 정책](https://www.riotgames.com/en/legal) 및
+[개발자 정책](https://developer.riotgames.com/policies/general)이 별도로 적용됩니다.
