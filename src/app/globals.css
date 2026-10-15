@@ -258,8 +258,7 @@ button {
   border-color: var(--border);
 }
 
-.button:hover:not(:disabled),
-.login-form button:hover:not(:disabled) {
+.button:hover:not(:disabled) {
   background: var(--accent-hover);
 }
 
@@ -274,13 +273,15 @@ button {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 16px;
-  padding: 32px;
+  padding: 32px clamp(24px, 5vw, 32px);
   box-shadow: 0 8px 24px var(--shadow);
 }
 
 .login-title {
-  margin: 8px 0 4px;
-  font-size: 1.75rem;
+  margin: 0;
+  font-size: 3rem;
+  line-height: 1.2;
+  text-align: center;
 }
 
 .login-form {
@@ -337,20 +338,92 @@ button {
   background: var(--accent-soft);
 }
 
-.login-form button {
+.discord-login-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 48px;
   margin-top: 8px;
-  padding: 10px 16px;
-  border-radius: 10px;
-  border: 1px solid transparent;
-  background: var(--accent);
-  color: var(--accent-contrast);
-  font-weight: 700;
+  padding: 12px 24px;
+  border-radius: 40px;
+  border: 1px solid rgb(0 0 0 / 8%);
+  background: #5865f2;
+  background-image: linear-gradient(45deg, #4752c4, #6571f3);
+  color: #fff;
+  font-weight: 600;
+  line-height: 1.5;
   cursor: pointer;
 }
 
-.login-form button:disabled {
+.discord-login-button svg {
+  flex-shrink: 0;
+}
+
+.discord-login-button:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgb(71 82 196 / 25%);
+}
+
+.discord-login-button:active:not(:disabled) {
+  box-shadow: inset 0 0 0 100px rgb(0 0 0 / 12%);
+}
+
+.discord-login-button:focus-visible {
+  outline: 3px solid #5865f2;
+  outline-offset: 3px;
+}
+
+.discord-login-button:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+.login-signup-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 24px 0;
+  color: var(--muted);
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.login-signup-divider::before,
+.login-signup-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.login-signup-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 12px 24px;
+  border: 1px solid #cbd0fb;
+  border-radius: 40px;
+  background: #f4f3ff;
+  color: #4752c4;
+  font-weight: 600;
+  line-height: 1.5;
+  text-decoration: none;
+}
+
+.login-signup-button:hover {
+  border-color: #5865f2;
+  background: #e9ebff;
+}
+
+.login-signup-button:active {
+  background: #e0e3ff;
+}
+
+.login-signup-button:focus-visible {
+  outline: 3px solid #5865f2;
+  outline-offset: 3px;
 }
 
 .form-error {

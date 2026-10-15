@@ -1,5 +1,28 @@
 import { LoginForm } from "./login-form";
 
+const DEFAULT_MAIN_SIGNUP_URL =
+  "https://www.somoim.co.kr/9ee6188a-6000-11ee-be3e-0ae46c4721911";
+
+function getMainSignupUrl() {
+  const configured = process.env.MAIN_SIGNUP_URL?.trim();
+  if (!configured) return DEFAULT_MAIN_SIGNUP_URL;
+
+  try {
+    const url = new URL(configured);
+    if (
+      ["https:", "http:"].includes(url.protocol) &&
+      !url.username &&
+      !url.password
+    ) {
+      return url.href;
+    }
+  } catch {
+    // Keep the signup entry usable when its optional URL is misconfigured.
+  }
+
+  return DEFAULT_MAIN_SIGNUP_URL;
+}
+
 const MESSAGES: Record<string, string> = {
   membership: "지정된 Discord 서버의 멤버만 이용할 수 있습니다.",
   cancelled: "Discord 로그인이 취소되었습니다.",
@@ -20,15 +43,17 @@ export default async function LoginPage({
   return (
     <main className="app-shell">
       <section className="login-card">
-        <p className="eyebrow">LLVY</p>
-        <h1 className="login-title">내전 전적 보관소</h1>
-        <p className="summary">Discord 계정으로 입장하세요.</p>
+        <h1 className="login-title">LLVY</h1>
         {typeof error === "string" && Object.hasOwn(MESSAGES, error) ? (
           <p className="form-error" role="alert">
             {MESSAGES[error]}
           </p>
         ) : null}
         <LoginForm redirectTo={redirectTo ?? "/"} />
+        <p className="login-signup-divider">아직 모임원이 아니라면?</p>
+        <a href={getMainSignupUrl()} className="login-signup-button">
+          가입하기
+        </a>
       </section>
     </main>
   );

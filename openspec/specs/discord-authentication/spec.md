@@ -6,6 +6,29 @@ Admit verified Discord guild members through browser-bound OAuth and bounded pro
 
 ## Requirements
 
+### Requirement: Login entry follows Discord branding
+
+The login page SHALL display a large, centered `LLVY` heading without a secondary title or introductory sentence. It SHALL display a button labelled `Discord로 시작하기`, using the Blurple gradient and rounded shape from Discord's official Social SDK branding guide and its official white symbol with the original geometry, color and aspect ratio. The button SHALL provide spacing around the symbol and text, a minimum 48px target height and a visible keyboard focus indicator. The decorative symbol SHALL be hidden from assistive technology and rendered without an external image request.
+
+#### Scenario: Visitor starts Discord login
+
+- **WHEN** an unauthenticated visitor opens the login page and activates the branded button by pointer or keyboard
+- **THEN** the existing GET form SHALL submit to `/api/auth/discord` with the sanitized internal `redirectTo`, and the button's accessible name SHALL be `Discord로 시작하기`
+
+### Requirement: Login page provides a configurable main signup link
+
+The login page SHALL display a `가입하기` link below the Discord login button, separated by vertical spacing and the centered text `아직 모임원이 아니라면?` with thin decorative lines on both sides. It SHALL use a complementary outlined style without Discord branding, provide a visible keyboard focus indicator and navigate in the same tab. Its default destination SHALL be `https://www.somoim.co.kr/9ee6188a-6000-11ee-be3e-0ae46c4721911`. The server SHALL read `MAIN_SIGNUP_URL` at render time to override that destination with a trimmed absolute HTTP(S) URL containing no username or password.
+
+#### Scenario: Default signup destination
+
+- **WHEN** `MAIN_SIGNUP_URL` is absent, blank, malformed, uses a non-HTTP(S) scheme or contains credentials
+- **THEN** the signup link SHALL use the default destination and the login page SHALL remain available
+
+#### Scenario: Configured signup destination
+
+- **WHEN** `MAIN_SIGNUP_URL` contains a valid absolute HTTP(S) URL without credentials
+- **THEN** activating `가입하기` SHALL navigate to that URL without submitting the Discord login form
+
 ### Requirement: Discord authorization code login uses validated server configuration
 
 The system SHALL use Discord OAuth2 Authorization Code login. It SHALL require server-only DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, DISCORD_BOT_TOKEN, DISCORD_REDIRECT_URI, DISCORD_GUILD_ID, DISCORD_OWNER_USER_ID and an independent AUTH_SECRET of at least 32 UTF-8 bytes after trimming. User login SHALL request only identify, obtain the verified user ID from Discord's current-user endpoint, and treat Discord IDs as exact decimal strings. Guild membership SHALL use the configured bot's individual-member REST endpoint. Production callback URLs SHALL use HTTPS and SHALL be configured independently of caller-controlled Host or forwarding headers. Local HTTP SHALL be limited to explicitly registered localhost development URLs.
