@@ -94,6 +94,10 @@ vi.mock("@/lib/member-history", () => ({
   getMemberIdentity: async (id: string) =>
     (await mocks.getMemberHistory(id))?.member ?? null,
 }));
+vi.mock("@/lib/member-relationships", () => ({
+  getMemberRelationshipHighlights: async (id: string) =>
+    (await mocks.getMemberHistory(id)).relationshipStats,
+}));
 vi.mock("@/lib/pending-upload-store", () => ({
   createPendingUpload: mocks.createPendingUpload,
   UploadBudgetExceeded: class extends Error {},
@@ -528,6 +532,18 @@ describe("verified role visibility", () => {
         { position: "UTILITY", totalGames: 1, winRate: 100 },
         { position: null, totalGames: 1, winRate: null },
       ],
+      relationshipStats: [
+        {
+          kind: "allyGames",
+          memberId: randomUUID(),
+          memberName: "함께한 친구",
+          totalGames: 3,
+          wins: 2,
+          losses: 1,
+          undecided: 0,
+          winRate: 200 / 3,
+        },
+      ],
       games: [],
     });
     const html = renderToStaticMarkup(
@@ -558,6 +574,9 @@ describe("verified role visibility", () => {
       html.indexOf("플레이 포지션"),
     );
     expect(html.indexOf("플레이 포지션")).toBeLessThan(
+      html.indexOf("가장 많이 함께한 팀원"),
+    );
+    expect(html.indexOf("가장 많이 함께한 팀원")).toBeLessThan(
       html.indexOf("연결된 라이엇 계정"),
     );
   });
@@ -593,6 +612,7 @@ describe("verified role visibility", () => {
         },
         championStats: [],
         positionStats: [],
+        relationshipStats: [],
         games: [
           {
             ...GAME,

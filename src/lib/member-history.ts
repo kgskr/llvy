@@ -6,6 +6,10 @@ import { db } from "@/db";
 import { gameParticipants, games, members, riotAccounts } from "@/db/schema";
 import { isUuid } from "@/lib/validation";
 import { readParticipantLoadout } from "@/lib/participant-loadout";
+import {
+  getMemberRelationshipHighlights,
+  type MemberRelationshipHighlight,
+} from "@/lib/member-relationships";
 
 export type MemberGameResult = "win" | "loss" | "unknown";
 
@@ -63,6 +67,7 @@ export type MemberHistory = {
     totalGames: number;
     winRate: number | null;
   }[];
+  relationshipStats: MemberRelationshipHighlight[];
   games: MemberHistoryGame[];
 };
 
@@ -316,10 +321,11 @@ export async function getMemberHistory(
 ): Promise<MemberHistory | null> {
   const member = await getMemberIdentity(memberId);
   if (!member) return null;
-  const [accounts, aggregates, games] = await Promise.all([
+  const [accounts, aggregates, games, relationshipStats] = await Promise.all([
     getMemberAccounts(memberId),
     getMemberHistoryAggregates(memberId),
     getMemberHistoryPage(memberId, limit, offset),
+    getMemberRelationshipHighlights(memberId),
   ]);
-  return { member, accounts, ...aggregates, games };
+  return { member, accounts, ...aggregates, games, relationshipStats };
 }

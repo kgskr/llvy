@@ -971,6 +971,7 @@ describe("combined member history", () => {
       games: [],
       championStats: [],
       positionStats: [],
+      relationshipStats: [],
     });
     const [account] = await db
       .insert(riotAccounts)

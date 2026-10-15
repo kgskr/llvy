@@ -9,6 +9,7 @@ import {
 import { positionLabel, riotId } from "@/lib/format";
 import { resolveMemberGameAssets } from "@/lib/member-game-assets";
 import { RecentGames } from "./recent-games";
+import { RelationshipHighlights } from "./relationship-highlights";
 import { getMemberHistoryReadModel } from "@/lib/read-model";
 import { parsePageNumber } from "@/lib/validation";
 
@@ -49,8 +50,15 @@ export default async function MemberHistoryPage({
   );
   if (page > pageCount) redirect(`/members/${id}?page=${pageCount}`);
 
-  const { member, accounts, stats, games, championStats, positionStats } =
-    history;
+  const {
+    member,
+    accounts,
+    stats,
+    games,
+    championStats,
+    positionStats,
+    relationshipStats,
+  } = history;
   const champions = championStats.map((summary) => summary.champion);
   const [championNames, championPortraits, recentAssets] = await Promise.all([
     champions.length
@@ -199,6 +207,8 @@ export default async function MemberHistoryPage({
           계정 중복 연결 경기는 제외합니다.
         </p>
       </section>
+
+      <RelationshipHighlights highlights={relationshipStats} />
 
       <section className="card stack">
         <h2>연결된 라이엇 계정</h2>

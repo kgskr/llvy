@@ -35,7 +35,8 @@ REDIS_URL="rediss://default:<password>@<host>:6379"
 | 경기 목록·개수                 | 30분              | game-list; 목록은 members, accounts도 포함      |
 | 경기 상세                      | 6시간             | 해당 game, members, accounts                    |
 | 전적 전체·챔피언·포지션 통계   | 1시간             | history                                         |
-| 전적 경기 페이지               | 30분              | history, accounts                               |
+| 전적 관계별 승률·만남 통계     | 1시간             | history, members, accounts                      |
+| 전적 경기 페이지               | 30분              | history, members, accounts                      |
 | 전적의 별도 연결 계정 목록     | 30분              | accounts                                        |
 | 호환용 닉네임 부분 검색        | 5분               | members, accounts, riot-eligibility             |
 | 이름·Riot ID 자동완성 인덱스   | 6시간             | members/accounts 또는 accounts/riot-eligibility |

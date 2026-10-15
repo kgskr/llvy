@@ -27,6 +27,10 @@ import {
 } from "@/test/database";
 import { replayBytes } from "@/test/replay";
 import { ownerActor } from "@/test/actor";
+import {
+  relationshipGameFixture,
+  relationshipMemberFixture,
+} from "@/test/member-relationships";
 import { createRedisProxy } from "@/test/redis-proxy";
 
 const mocks = vi.hoisted(() => ({ token: undefined as string | undefined }));
@@ -325,8 +329,14 @@ describe.skipIf(!testUrl)(
       const query = vi.spyOn(postgres, "query");
       const next = await getMemberHistoryReadModel(member.id, 1, 1);
       expect(next.history?.stats).toEqual(initial.history?.stats);
+      expect(next.history?.relationshipStats).toEqual(
+        initial.history?.relationshipStats,
+      );
       expect(next.history?.games).toEqual([]);
       expect(query.mock.calls.some(([sql]) => sql.includes("avg("))).toBe(
+        false,
+      );
+      expect(query.mock.calls.some(([sql]) => sql.includes("peer_games"))).toBe(
         false,
       );
       const before = (await dataKeys()).filter((key) =>
@@ -344,6 +354,65 @@ describe.skipIf(!testUrl)(
       expect(
         (await dataKeys()).filter((key) => key.includes(":game-list-v3:")),
       ).toEqual(listKeys);
+    });
+
+    it("refreshes relationship identities and thresholds while reusing summaries across pages", async () => {
+      const own = await relationshipMemberFixture("기준 회원");
+      const peer = await relationshipMemberFixture("친구");
+      const gameIds = [];
+      for (let i = 0; i < 3; i++)
+        gameIds.push(
+          await relationshipGameFixture([
+            { account: own.accounts[i % 2], team: 100 },
+            { account: peer.accounts[0], team: 200 },
+          ]),
+        );
+      const read = async (offset = 0) =>
+        (await getMemberHistoryReadModel(own.id, 1, offset)).history!
+          .relationshipStats;
+      const query = vi.spyOn(postgres, "query");
+      const initial = await read();
+      expect(initial).toHaveLength(2);
+      expect(initial[0]).toMatchObject({
+        kind: "opponentWinRate",
+        memberName: "친구",
+        totalGames: 3,
+        winRate: 100,
+      });
+      expect(
+        query.mock.calls.filter(([sql]) => sql.includes("peer_games")),
+      ).toHaveLength(1);
+      query.mockClear();
+      expect(await read(1)).toEqual(initial);
+      expect(query.mock.calls.some(([sql]) => sql.includes("peer_games"))).toBe(
+        false,
+      );
+      const key = (await dataKeys()).find((key) =>
+        key.includes(":member-relationships-v1:"),
+      )!;
+      expect(await redis.ttl(key)).toBeGreaterThanOrEqual(3238);
+      expect((await redis.get(key))!).not.toMatch(
+        /PUUID|birthYear|rawStats|private-fixture|gameName|tagLine/,
+      );
+      await updateMember(peer.id, "바뀐 이름", 1990);
+      query.mockClear();
+      expect((await read())[0].memberName).toBe("바뀐 이름");
+      expect(query.mock.calls.some(([sql]) => sql.includes("peer_games"))).toBe(
+        true,
+      );
+      expect(query.mock.calls.some(([sql]) => sql.includes("avg("))).toBe(
+        false,
+      );
+      await setGameExcluded(gameIds[0], true);
+      expect(await read()).toEqual([]);
+      await setGameExcluded(gameIds[0], false);
+      expect(await read()).toHaveLength(2);
+      await unlinkAccount(peer.accounts[0]);
+      expect(await read()).toEqual([]);
+      await linkAccount(peer.accounts[0], peer.id);
+      expect(await read()).toHaveLength(2);
+      await deleteMember(peer.id);
+      expect(await read()).toEqual([]);
     });
 
     it("returns index data before publication and rejects an expired owner's late publication", async () => {

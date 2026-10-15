@@ -48,6 +48,10 @@ vi.mock("@/lib/member-history", () => ({
   getMemberIdentity: async (id: string) =>
     (await mocks.history(id))?.member ?? null,
 }));
+vi.mock("@/lib/member-relationships", () => ({
+  getMemberRelationshipHighlights: async (id: string) =>
+    (await mocks.history(id)).relationshipStats,
+}));
 vi.mock("@/lib/champions", () => ({
   resolveChampionNames: async () => new Map(),
   resolveChampionPortraits: async () => new Map(),
@@ -143,6 +147,7 @@ const HISTORY = {
   },
   championStats: [],
   positionStats: [],
+  relationshipStats: [],
   games: [],
 };
 

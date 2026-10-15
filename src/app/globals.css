@@ -1079,6 +1079,42 @@ a.game-list-name:hover {
   margin: 0;
 }
 
+.relationship-grid {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(190px, 1fr);
+  gap: 16px;
+  margin: 0;
+  padding-bottom: 4px;
+  overflow-x: auto;
+}
+
+.relationship-card dt,
+.relationship-record {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.relationship-card dd {
+  margin: 12px 0 0;
+  overflow-wrap: anywhere;
+}
+
+.relationship-card dd > a {
+  font-weight: 700;
+}
+
+.relationship-value {
+  display: block;
+  margin: 8px 0;
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.relationship-record {
+  display: block;
+}
+
 .stats-grid dt,
 .table-note {
   color: var(--muted);

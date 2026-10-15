@@ -15,6 +15,7 @@ import {
   getMemberIdentity,
 } from "@/lib/member-history";
 import { projectMember } from "@/lib/member-privacy";
+import { getMemberRelationshipHighlights } from "@/lib/member-relationships";
 import { listMembersWithAccounts } from "@/lib/members";
 import { getReadSession } from "@/lib/session";
 import { parsePageNumber } from "@/lib/validation";
@@ -111,7 +112,7 @@ export async function getMemberHistoryReadModel(
   limit = Number.isSafeInteger(limit) && limit >= 0 ? Math.min(limit, 100) : 25;
   offset = Number.isSafeInteger(offset) && offset >= 0 ? offset : 0;
   const context = await prepareCache(["members", "accounts", "history"]);
-  const [accounts, aggregate, games] = await Promise.all([
+  const [accounts, aggregate, games, relationshipStats] = await Promise.all([
     cachedQuery(
       { query: "member-accounts-v3", role, args: [id], policy: "accounts" },
       () => getMemberAccounts(id),
@@ -133,6 +134,16 @@ export async function getMemberHistoryReadModel(
       () => getMemberHistoryPage(id, limit, offset),
       context,
     ),
+    cachedQuery(
+      {
+        query: "member-relationships-v1",
+        role,
+        args: [id],
+        policy: "aggregate",
+      },
+      () => getMemberRelationshipHighlights(id),
+      context,
+    ),
   ]);
   return {
     role,
@@ -144,6 +155,7 @@ export async function getMemberHistoryReadModel(
       accounts,
       ...aggregate,
       games,
+      relationshipStats,
     },
   };
 }
