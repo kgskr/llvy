@@ -116,7 +116,14 @@ export function GameList({
                       aria-label={team.label}
                       key={team.key}
                     >
-                      <h2>{team.label}</h2>
+                      <div className="game-list-team-heading">
+                        <h2>{team.label}</h2>
+                        {winner !== "unknown" && team.key !== "unknown" ? (
+                          <span className="game-list-team-result">
+                            {team.key === winner ? "승리" : "패배"}
+                          </span>
+                        ) : null}
+                      </div>
                       <ul>
                         {team.players.sort(orderPlayers).map((player) => {
                           const name = displayName(player);
@@ -169,21 +176,23 @@ export function GameList({
                     </section>
                   ))}
               </div>
-              <div className="game-list-actions">
-                <Link
-                  href={`/games/${game.id}?view=${visibility}&page=${page}`}
-                  prefetch={false}
-                >
-                  상세 →
-                </Link>
-                {canRestore ? (
-                  <GameVisibilityForm gameId={game.id} excluded />
-                ) : null}
+              <div className="game-list-footer">
+                <p className="game-list-comment">
+                  <span>코멘트</span>
+                  <span>{game.comment ?? "—"}</span>
+                </p>
+                <div className="game-list-actions">
+                  <Link
+                    href={`/games/${game.id}?view=${visibility}&page=${page}`}
+                    prefetch={false}
+                  >
+                    상세 →
+                  </Link>
+                  {canRestore ? (
+                    <GameVisibilityForm gameId={game.id} excluded />
+                  ) : null}
+                </div>
               </div>
-              <p className="game-list-comment">
-                <span>코멘트</span>
-                <span>{game.comment ?? "—"}</span>
-              </p>
             </article>
           </li>
         );

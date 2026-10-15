@@ -76,6 +76,45 @@ it.each([false, true])(
   },
 );
 
+it.each([100, 200, null, 300])(
+  "labels each known team's outcome only when the winner is known (%s)",
+  (winningTeam) => {
+    const game = gameListFixture({ winningTeam });
+    game.participants.push({
+      ...game.participants[0],
+      id: "unknown-team-player",
+      team: null,
+    });
+    const html = renderToStaticMarkup(
+      <GameList {...baseProps} games={[game]} />,
+    );
+    const knownWinner = winningTeam === 100 || winningTeam === 200;
+    for (const [team, id] of [
+      ["blue", 100],
+      ["red", 200],
+    ] as const) {
+      const section = html.match(
+        new RegExp(
+          `<section class="game-list-team game-list-team-${team}"[\\s\\S]*?</section>`,
+        ),
+      )?.[0];
+      expect(section).toBeDefined();
+      if (knownWinner) {
+        expect(section).toContain(
+          `>${winningTeam === id ? "승리" : "패배"}</span>`,
+        );
+      } else {
+        expect(section).not.toContain("game-list-team-result");
+      }
+    }
+    const unknownTeam = html.match(
+      /<section class="game-list-team game-list-team-unknown"[\s\S]*?<\/section>/,
+    )?.[0];
+    expect(unknownTeam).toBeDefined();
+    expect(unknownTeam).not.toContain("game-list-team-result");
+  },
+);
+
 it("keeps unknown teams, roles and image fallbacks without inventing a winner", () => {
   const game = gameListFixture({
     winningTeam: null,

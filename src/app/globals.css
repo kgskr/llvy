@@ -514,9 +514,8 @@ button {
   --game-list-muted: var(--muted);
   --game-list-rule: var(--border);
   display: grid;
-  grid-template-columns: 124px minmax(0, 1fr) 78px;
-  gap: 14px 18px;
-  padding: 18px;
+  grid-template-columns: 124px minmax(0, 1fr);
+  overflow: hidden;
   border-radius: 8px;
   border-left: 4px solid #b1a79c;
   background: var(--surface);
@@ -525,18 +524,18 @@ button {
 
 .game-list-blue,
 .game-list-red {
-  --game-list-muted: #ddd8e0;
+  --game-list-muted: #d0ccd5;
   --game-list-rule: rgba(255, 255, 255, 0.16);
   color: #fffdf9;
 }
 
 .game-list-blue {
-  background: #28344e;
+  background: #1c263a;
   border-left-color: #78a7ff;
 }
 
 .game-list-red {
-  background: #59343b;
+  background: #3d242a;
   border-left-color: #e48f9c;
 }
 
@@ -546,6 +545,7 @@ button {
   align-items: flex-start;
   gap: 5px;
   min-width: 0;
+  padding: 16px 14px;
 }
 
 .game-list-overview time {
@@ -572,7 +572,6 @@ button {
 
 .game-list-teams {
   display: grid;
-  gap: 12px;
   min-width: 0;
 }
 
@@ -581,6 +580,40 @@ button {
   grid-template-columns: 46px minmax(0, 1fr);
   gap: 10px;
   align-items: center;
+  min-width: 0;
+  padding: 14px 16px;
+}
+
+.game-list-team + .game-list-team {
+  border-top: 1px solid var(--game-list-rule);
+}
+
+.game-list-team-blue,
+.game-list-team-red {
+  --game-list-muted: #d0ccd5;
+  --game-list-rule: rgba(255, 255, 255, 0.16);
+  color: #fffdf9;
+}
+
+.game-list-team-blue {
+  background: #28344e;
+}
+
+.game-list-team-red {
+  background: #59343b;
+}
+
+.game-list-team-unknown {
+  --game-list-muted: var(--muted);
+  --game-list-rule: var(--border);
+  color: var(--foreground);
+  background: var(--surface-soft);
+}
+
+.game-list-team-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .game-list-team h2 {
@@ -588,14 +621,17 @@ button {
   font-size: 0.7rem;
 }
 
-.game-list-blue .game-list-team-blue h2,
-.game-list-red .game-list-team-blue h2 {
+.game-list-team-blue h2 {
   color: #aecbff;
 }
 
-.game-list-blue .game-list-team-red h2,
-.game-list-red .game-list-team-red h2 {
+.game-list-team-red h2 {
   color: #ffc1c9;
+}
+
+.game-list-team-result {
+  color: var(--game-list-muted);
+  font-size: 0.68rem;
 }
 
 .game-list-team ul {
@@ -642,11 +678,16 @@ a.game-list-name:hover {
 
 .game-list-actions {
   display: flex;
-  flex-direction: column;
-  justify-content: center;
-  align-items: flex-end;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
   gap: 12px;
+  min-width: 0;
   font-size: 0.78rem;
+}
+
+.game-list-actions > a {
+  white-space: nowrap;
 }
 
 .game-list-actions .button {
@@ -655,13 +696,26 @@ a.game-list-name:hover {
   white-space: nowrap;
 }
 
+.game-list-blue .form-error,
+.game-list-red .form-error {
+  color: #ffc1c9;
+}
+
+.game-list-footer {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px 18px;
+  padding: 11px 16px;
+  border-top: 1px solid var(--game-list-rule);
+}
+
 .game-list-comment {
-  grid-column: 2 / -1;
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding-top: 10px;
-  border-top: 1px solid var(--game-list-rule);
+  min-width: 0;
   color: var(--game-list-muted);
   margin: 0;
   font-size: 0.75rem;
@@ -684,7 +738,7 @@ a.game-list-name:hover {
 
 @media (max-width: 900px) {
   .game-list-row {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .game-list-overview {
@@ -701,21 +755,13 @@ a.game-list-name:hover {
   .game-list-duration {
     margin-top: 0;
   }
-
-  .game-list-teams,
-  .game-list-comment {
-    grid-column: 1 / -1;
-  }
-
-  .game-list-actions {
-    grid-column: 2;
-    grid-row: 1;
-  }
 }
 
 @media (max-width: 560px) {
-  .game-list-row {
-    padding: 14px 12px;
+  .game-list-overview,
+  .game-list-team,
+  .game-list-footer {
+    padding: 12px;
   }
 
   .game-list-team {
@@ -723,9 +769,10 @@ a.game-list-name:hover {
     gap: 8px;
   }
 
-  .game-list-team + .game-list-team {
-    padding-top: 12px;
-    border-top: 1px solid var(--game-list-rule);
+  .game-list-team-heading {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 8px;
   }
 
   .game-list-team ul {
@@ -736,6 +783,10 @@ a.game-list-name:hover {
   .game-list-name {
     white-space: normal;
     overflow-wrap: anywhere;
+  }
+
+  .game-list-footer {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
