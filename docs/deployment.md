@@ -109,6 +109,24 @@ npm run db:migrate
 4. **관리**에서 모임원을 만들고 Riot 계정을 연결한 뒤, 검색과 모임원 전적을 확인합니다.
 5. Vercel의 **Settings → Cron Jobs**에서 아래 예약 작업이 등록되어 있는지 확인합니다.
 
+### Web Analytics
+
+앱은 `@vercel/analytics/next`를 루트 레이아웃에 연결해 로그인 페이지와 로그인 후
+화면의 기본 페이지 조회를 수집합니다. 별도 API 키나 환경변수를 추가할 필요는 없습니다.
+
+1. Vercel 프로젝트의 **Analytics**에서 Web Analytics를 활성화합니다.
+2. 패키지와 레이아웃 변경이 포함된 코드를 배포합니다. 대시보드 활성화만으로 기존 배포에
+   SDK가 추가되지는 않습니다.
+3. 운영 사이트의 로그인 페이지와 로그인 후 화면을 방문합니다. 브라우저 Network에서
+   Analytics 스크립트와 페이지 조회 요청이 성공하는지 확인합니다. 기본 경로는
+   `/_vercel/insights/script.js`, `/_vercel/insights/view`이며 Vercel 설정에 따라 별도 수집
+   경로를 사용할 수도 있습니다.
+4. Vercel의 **Analytics**에서 페이지 조회가 표시되는지 확인합니다.
+
+로컬 개발은 SDK 기본 개발 모드를 사용합니다. 로컬 테스트·빌드 통과는 운영 수집 완료를
+뜻하지 않으므로 배포 후 위 확인을 별도로 수행하세요. 설치와 수집 확인에 관한 자세한 내용은
+[Vercel Web Analytics 안내](https://vercel.com/docs/analytics/quickstart)를 참고하세요.
+
 ### 예약 작업
 
 [`vercel.json`](../vercel.json)에 두 작업이 하루 한 번 실행되도록 설정되어 있습니다.

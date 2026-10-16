@@ -25,10 +25,11 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  // Protect everything except the login page, Next internals, and the favicon.
+  // Protect app routes while allowing login, maintenance, Next internals,
+  // the favicon, and Vercel Web Analytics endpoints.
   // Exclusions are anchored to a path-segment boundary so e.g. /login-foo is
   // NOT accidentally excluded from auth.
   matcher: [
-    "/((?!login$|login/|api/auth/discord$|api/auth/discord/callback$|api/maintenance/uploads$|api/maintenance/auth$|_next/static|_next/image|favicon\\.ico$).*)",
+    "/((?!login$|login/|api/auth/discord$|api/auth/discord/callback$|api/maintenance/uploads$|api/maintenance/auth$|_next/static|_next/image|_vercel/insights$|_vercel/insights/|favicon\\.ico$).*)",
   ],
 };

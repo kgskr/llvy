@@ -25,6 +25,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@vercel/analytics": "^2.0.1",
     "@vercel/blob": "~2.5.0",
     "@vercel/postgres": "^0.10.0",
     "drizzle-orm": "^0.45.2",

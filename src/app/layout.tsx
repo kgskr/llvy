@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -28,6 +29,7 @@ export default function RootLayout({
             Riot Games 개발자 정책
           </a>
         </footer>
+        <Analytics />
       </body>
     </html>
   );
