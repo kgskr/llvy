@@ -1,0 +1,357 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "LLVY desktop-v1 candidate wire contracts",
+  "$defs": {
+    "startRequest": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "const": "llvy-windows-uploader"
+        },
+        "redirectUri": {
+          "type": "string",
+          "pattern": "^http://127\\.0\\.0\\.1:[1-9][0-9]{0,4}/callback$"
+        },
+        "state": {
+          "type": "string"
+        },
+        "codeChallenge": {
+          "type": "string"
+        },
+        "codeChallengeMethod": {
+          "const": "S256"
+        },
+        "mode": {
+          "enum": ["transient", "persistent"]
+        }
+      },
+      "required": [
+        "clientId",
+        "redirectUri",
+        "state",
+        "codeChallenge",
+        "codeChallengeMethod",
+        "mode"
+      ],
+      "additionalProperties": false
+    },
+    "start": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "const": "desktop-v1"
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "approvalPath": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["protocol", "requestId", "approvalPath", "expiresAt"],
+      "additionalProperties": true
+    },
+    "exchangeRequest": {
+      "type": "object",
+      "properties": {
+        "clientId": {
+          "const": "llvy-windows-uploader"
+        },
+        "code": {
+          "type": "string"
+        },
+        "redirectUri": {
+          "type": "string"
+        },
+        "codeVerifier": {
+          "type": "string"
+        }
+      },
+      "required": ["clientId", "code", "redirectUri", "codeVerifier"],
+      "additionalProperties": false
+    },
+    "refreshRequest": {
+      "type": "object",
+      "properties": {
+        "refreshToken": {
+          "type": "string"
+        }
+      },
+      "required": ["refreshToken"],
+      "additionalProperties": false
+    },
+    "credentials": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "const": "desktop-v1"
+        },
+        "tokenType": {
+          "const": "Bearer"
+        },
+        "accessToken": {
+          "type": "string"
+        },
+        "refreshToken": {
+          "type": "string"
+        },
+        "accessExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "deviceExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "deviceSessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "scope": {
+          "const": "replay:upload replay:status"
+        }
+      },
+      "required": [
+        "protocol",
+        "tokenType",
+        "accessToken",
+        "refreshToken",
+        "accessExpiresAt",
+        "deviceExpiresAt",
+        "deviceSessionId",
+        "scope"
+      ],
+      "additionalProperties": true
+    },
+    "quota": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "remaining": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "resetAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        }
+      },
+      "required": ["limit", "remaining", "resetAt"],
+      "additionalProperties": true
+    },
+    "session": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "const": "desktop-v1"
+        },
+        "account": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "role": {
+              "enum": ["admin", "owner"]
+            }
+          },
+          "required": ["name", "role"],
+          "additionalProperties": true
+        },
+        "deviceSessionId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "deviceExpiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "maxUploadBytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "quota": {
+          "type": "object",
+          "properties": {
+            "asOf": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "account": {
+              "$ref": "#/$defs/quota"
+            },
+            "global": {
+              "$ref": "#/$defs/quota"
+            }
+          },
+          "required": ["asOf", "account", "global"],
+          "additionalProperties": true
+        }
+      },
+      "required": [
+        "protocol",
+        "account",
+        "deviceSessionId",
+        "deviceExpiresAt",
+        "maxUploadBytes",
+        "quota"
+      ],
+      "additionalProperties": true
+    },
+    "uploadRequest": {
+      "type": "object",
+      "properties": {
+        "filename": {
+          "type": "string",
+          "maxLength": 255
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 67108864
+        },
+        "lastModified": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "clientSha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": ["filename", "size", "lastModified", "clientSha256"],
+      "additionalProperties": false
+    },
+    "reservation": {
+      "type": "object",
+      "properties": {
+        "uploadId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "nonce": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uploadId", "nonce", "expiresAt"],
+      "additionalProperties": true
+    },
+    "nonceRequest": {
+      "type": "object",
+      "properties": {
+        "nonce": {
+          "type": "string"
+        }
+      },
+      "required": ["nonce"],
+      "additionalProperties": false
+    },
+    "transfer": {
+      "type": "object",
+      "properties": {
+        "uploadUrl": {
+          "type": "string",
+          "format": "uri"
+        },
+        "method": {
+          "const": "PUT"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uploadUrl", "method", "headers", "expiresAt"],
+      "additionalProperties": true
+    },
+    "result": {
+      "type": "object",
+      "properties": {
+        "uploadId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "processing",
+            "completed",
+            "duplicate",
+            "failed",
+            "outcome_unknown"
+          ]
+        },
+        "gameId": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "duplicate": {
+          "type": "boolean"
+        },
+        "gamePath": {
+          "type": "string"
+        },
+        "errorCode": {
+          "type": "string"
+        }
+      },
+      "required": ["uploadId", "state"],
+      "additionalProperties": true
+    },
+    "error": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "retryable": {
+              "type": "boolean"
+            }
+          },
+          "required": ["code", "message", "retryable"],
+          "additionalProperties": true
+        },
+        "requestId": {
+          "type": "string",
+          "format": "uuid"
+        }
+      },
+      "required": ["error", "requestId"],
+      "additionalProperties": true
+    },
+    "revoked": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "const": true
+        }
+      },
+      "required": ["ok"],
+      "additionalProperties": true
+    }
+  }
+}

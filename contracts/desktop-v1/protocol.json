@@ -1,0 +1,38 @@
+{
+  "protocol": "desktop-v1",
+  "status": "candidate-live-blob-validation-pending",
+  "clientId": "llvy-windows-uploader",
+  "productOrigin": "https://llvy.my",
+  "scope": "replay:upload replay:status",
+  "maxUploadBytes": 67108864,
+  "transfer": {
+    "origin": "https://vercel.com",
+    "path": "/api/blob/",
+    "method": "PUT",
+    "headers": {
+      "content-type": ["application/octet-stream"],
+      "x-content-type": ["application/octet-stream"],
+      "x-api-version": ["12"],
+      "x-vercel-blob-access": ["public", "private"],
+      "x-vercel-blob-store-id": "dns-label"
+    }
+  },
+  "routes": {
+    "start": "POST /api/desktop/v1/auth/requests",
+    "exchange": "POST /api/desktop/v1/auth/token",
+    "refresh": "POST /api/desktop/v1/auth/refresh",
+    "revoke": "POST /api/desktop/v1/auth/revoke",
+    "session": "GET /api/desktop/v1/session",
+    "reserve": "POST /api/desktop/v1/uploads",
+    "transfer": "POST /api/desktop/v1/uploads/{id}/transfer",
+    "process": "POST /api/desktop/v1/uploads/{id}/process",
+    "status": "GET /api/desktop/v1/uploads/{id}"
+  },
+  "retry": {
+    "maximumAttempts": 3,
+    "refreshReplay": false,
+    "putReplay": "only-after-object_not_uploaded",
+    "reservation": "same-key-and-metadata",
+    "process": "status-read-after-uncertain-response"
+  }
+}

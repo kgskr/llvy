@@ -1,0 +1,81 @@
+{
+  "session": {
+    "protocol": "desktop-v1",
+    "account": {
+      "name": "Fixture user",
+      "role": "admin"
+    },
+    "deviceSessionId": "11111111-1111-4111-8111-111111111111",
+    "deviceExpiresAt": "2099-01-01T00:00:00.000Z",
+    "maxUploadBytes": 67108864,
+    "quota": {
+      "asOf": "2099-01-01T00:00:00.000Z",
+      "account": {
+        "limit": 10,
+        "remaining": 9,
+        "resetAt": "2099-01-01T00:00:00.000Z"
+      },
+      "global": {
+        "limit": 50,
+        "remaining": 49,
+        "resetAt": "2099-01-01T00:00:00.000Z"
+      }
+    }
+  },
+  "reservation": {
+    "uploadId": "11111111-1111-4111-8111-111111111111",
+    "nonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "expiresAt": "2099-01-01T00:00:00.000Z"
+  },
+  "completed": {
+    "uploadId": "11111111-1111-4111-8111-111111111111",
+    "state": "completed",
+    "gameId": "11111111-1111-4111-8111-111111111111",
+    "duplicate": false,
+    "gamePath": "/games/11111111-1111-4111-8111-111111111111"
+  },
+  "duplicate": {
+    "uploadId": "11111111-1111-4111-8111-111111111111",
+    "state": "duplicate",
+    "gameId": "11111111-1111-4111-8111-111111111111",
+    "duplicate": true,
+    "gamePath": "/games/11111111-1111-4111-8111-111111111111"
+  },
+  "processing": {
+    "uploadId": "11111111-1111-4111-8111-111111111111",
+    "state": "processing"
+  },
+  "unknown": {
+    "uploadId": "11111111-1111-4111-8111-111111111111",
+    "state": "outcome_unknown",
+    "errorCode": "outcome_unknown"
+  },
+  "expired": {
+    "error": {
+      "code": "reservation_expired",
+      "message": "reservation_expired",
+      "retryable": false
+    },
+    "requestId": "11111111-1111-4111-8111-111111111111"
+  },
+  "quota": {
+    "error": {
+      "code": "quota_exhausted",
+      "message": "quota_exhausted",
+      "retryable": true
+    },
+    "requestId": "11111111-1111-4111-8111-111111111111"
+  },
+  "transfer": {
+    "uploadUrl": "https://vercel.com/api/blob/?pathname=replays%2F11111111-1111-4111-8111-111111111111.rofl&vercel-blob-signature=fixture-not-usable",
+    "method": "PUT",
+    "headers": {
+      "content-type": "application/octet-stream",
+      "x-content-type": "application/octet-stream",
+      "x-api-version": "12",
+      "x-vercel-blob-access": "private",
+      "x-vercel-blob-store-id": "fixturestore"
+    },
+    "expiresAt": "2099-01-01T00:00:00.000Z"
+  }
+}
