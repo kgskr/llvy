@@ -77,5 +77,28 @@
       "x-vercel-blob-store-id": "fixturestore"
     },
     "expiresAt": "2099-01-01T00:00:00.000Z"
+  },
+  "uploaderSession": {
+    "protocol": "desktop-v1",
+    "account": {
+      "name": "Fixture uploader",
+      "role": "uploader"
+    },
+    "deviceSessionId": "11111111-1111-4111-8111-111111111111",
+    "deviceExpiresAt": "2099-01-01T00:00:00.000Z",
+    "maxUploadBytes": 67108864,
+    "quota": {
+      "asOf": "2099-01-01T00:00:00.000Z",
+      "account": {
+        "limit": 10,
+        "remaining": 9,
+        "resetAt": "2099-01-01T00:00:00.000Z"
+      },
+      "global": {
+        "limit": 50,
+        "remaining": 49,
+        "resetAt": "2099-01-01T00:00:00.000Z"
+      }
+    }
   }
 }

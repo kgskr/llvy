@@ -160,7 +160,7 @@
               "type": "string"
             },
             "role": {
-              "enum": ["admin", "owner"]
+              "enum": ["uploader", "admin", "owner"]
             }
           },
           "required": ["name", "role"],
