@@ -150,7 +150,7 @@ Production 배포에서 실행되며, Vercel이 `CRON_SECRET`을 인증 헤더�
 
 `0010_uploader_role.sql`은 `0009_desktop_uploader.sql` 다음에 적용하는 additive migration이다. `npm run db:migrate`로 journal에 따라 한 번 적용하며 SQL 파일을 수동 반복 실행하지 않는다. 기존 계정·admin grant·세션·감사 행의 역할을 변경하지 않고 nullable uploader snapshot, 예약 감사 복구용 `audit_metadata`와 새 grant table을 추가한다. 새 코드가 이 스키마를 읽으므로 schema-first 순서를 지킨다.
 
-1. 호환 계약 원본 commit과 앱 사본/hash 및 검사를 확정한다. 현재 계약은 로컬 `fe32e8a93a426b0446338d24c201c5b778dab682`로 고정했으며 원격 공개와 호환 배포는 남아 있다.
+1. 호환 계약 원본 commit과 앱 사본/hash 및 검사를 확정한다. 현재 계약은 `fe32e8a93a426b0446338d24c201c5b778dab682`로 고정했으며 `uploader-role-contract` ref를 원격에 공개했다. 호환 앱 릴리스와 실제 Windows 수용 검증은 별도 단계다.
 2. 기존 코드 상태에서 DB backup·migration 적용을 검증한다. 새 스키마를 남겨도 기존 admin/owner 행의 의미는 유지된다.
 3. 모든 serving 서버를 새 코드로 전환하고 구버전 요청을 drain한다. viewer 생년 projection cache 버전도 새 namespace를 사용한다.
 4. 호환 Windows 앱과 네 역할의 웹·Discord·Blob 동작을 확인한 뒤 업로더 grant를 부여한다. desktop 기본 false 정책은 유지한다.

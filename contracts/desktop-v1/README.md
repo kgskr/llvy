@@ -37,4 +37,4 @@ LLVY는 지원 중인 v1 exe의 응답 의미·필수 헤더를 깨지 않게 �
 
 `schema.json`의 session role은 `uploader`, `admin`, `owner`를 허용한다. `fixtures.json`은 기존 admin `session`을 보존하고 `uploaderSession`을 추가한다. viewer는 desktop 승인을 받을 수 없다. 엄격한 구버전 앱은 uploader 응답을 거부할 수 있으므로 이를 admin으로 위장하지 않는다.
 
-새 계약 commit 확정 → 앱 고정 사본/source.json/hash 갱신과 Go 검사 → 호환 서버/앱 배포 → 실제 Windows·Discord·Blob 수용 검증 → uploader 권한 활성화 순서다. 현재 앱 고정 revision은 로컬 `fe32e8a93a426b0446338d24c201c5b778dab682`이며 LLVY의 별도 `uploader-role-contract` ref와 사본/hash를 대조했다. 이 ref는 아직 원격 게시하지 않았고 서버 main·운영 배포와 구분한다. 로컬 파서 호환 수정만으로 릴리스 준비 완료로 판단하지 않는다.
+새 계약 commit 확정 → 앱 고정 사본/source.json/hash 갱신과 Go 검사 → 호환 서버/앱 배포 → 실제 Windows·Discord·Blob 수용 검증 → uploader 권한 활성화 순서다. 현재 앱 고정 revision은 `fe32e8a93a426b0446338d24c201c5b778dab682`이며 LLVY의 별도 `uploader-role-contract` ref와 사본/hash를 대조했다. 이 ref는 2026-10-23 원격에 게시했다. 서버 배포와 실제 앱 릴리스의 확인 범위는 [운영 검증 기록](../../docs/validation/2026-10-23-uploader-deployment.md)을 따른다. 로컬 파서 호환 수정만으로 릴리스 준비 완료로 판단하지 않는다.

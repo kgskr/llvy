@@ -1,6 +1,6 @@
 # Windows 업로더와 LLVY 서버
 
-상태: 2026-10-23 서버 API·인증·Go 연동을 구현하고 운영 DB에 `0008`~`0010` migration을 적용했다. desktop 기능은 기본 비활성화다. 서버 배포 결과와 남은 실제 Blob/Discord/Windows 검증은 [운영 검증 기록](validation/2026-10-23-uploader-deployment.md)을 따른다.
+상태: 2026-10-23 운영 DB에 `0008`~`0010` migration을 적용하고 호환 서버를 배포했다. desktop 기능은 기본 비활성화다. 서버 배포 결과와 남은 실제 Blob/Discord/Windows 검증은 [운영 검증 기록](validation/2026-10-23-uploader-deployment.md)을 따른다.
 
 ## 관리 경계
 
@@ -63,6 +63,6 @@ npm run desktop:revoke-all -- --apply --database-target db.example.invalid/llvy 
 
 `desktop-v1` session role에 `uploader`를 추가했다. URL·DTO 필드·scope·기기 수명과 한도는 유지한다. 관리자/오너가 업로더를 부여·회수하며 앱에 권한 관리 API를 제공하지 않는다. uploader grant는 별도 컬럼으로 연결 승인·기기·예약·감사에 고정하며 회수·재부여·승격 후 옛 연결은 재사용할 수 없다.
 
-서버 schema/fixture와 앱 파서를 수정하고 계약 `fe32e8a93a426b0446338d24c201c5b778dab682`를 로컬 ref에 고정했다. 앱 사본/hash가 일치하며 원격 공개·배포·실환경 검증은 남아 있다. [계약 배포 순서](../contracts/desktop-v1/README.md#업로더-역할-확장)와 [역할 적용/rollback](deployment.md#업로더-역할-적용)을 따른다.
+서버 schema/fixture와 앱 파서를 수정하고 계약 `fe32e8a93a426b0446338d24c201c5b778dab682`를 `uploader-role-contract` ref로 원격에 공개했다. 앱 사본/hash가 일치하며 실제 앱 릴리스·실환경 검증은 남아 있다. [계약 배포 순서](../contracts/desktop-v1/README.md#업로더-역할-확장)와 [역할 적용/rollback](deployment.md#업로더-역할-적용)을 따른다.
 
 오너는 감사 화면에서 제출 계정, 당시 역할/grant, 파일명과 서버 SHA-256, 업로드 ID, 기기·채널, 결과·게임을 확인한다. 실패·만료는 서버가 확보한 정보만 기록한다. 예약 정리와 게임 삭제 후에도 귀속은 유지한다. 앱의 로컬 진단에는 파일명·계정 정보를 추가하지 않는다.
