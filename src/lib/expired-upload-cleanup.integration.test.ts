@@ -111,7 +111,11 @@ describe("expired upload reconciliation", () => {
         targetId: binding.uploadId,
         requestId: binding.uploadId,
         result: "failure",
-        after: { reason: "upload_expired" },
+        after: {
+          reason: "upload_expired",
+          channel: "browser",
+          originalFilename: null,
+        },
       }),
     ]);
   });
@@ -143,7 +147,12 @@ describe("expired upload reconciliation", () => {
         targetId: binding.uploadId,
         requestId: binding.uploadId,
         result: "success",
-        after: { gameId: game.id, reason: "reconciled_commit" },
+        after: {
+          gameId: game.id,
+          reason: "reconciled_commit",
+          channel: "browser",
+          originalFilename: null,
+        },
       }),
     ]);
     expect((await db.select().from(games))[0].blobUrl).toBe(url);
@@ -243,7 +252,11 @@ describe("expired upload reconciliation", () => {
         actorName: "김이전관리자",
         requestId: binding.uploadId,
         result: "failure",
-        after: { reason: "upload_expired" },
+        after: {
+          reason: "upload_expired",
+          channel: "browser",
+          originalFilename: null,
+        },
       }),
     ]);
     expect(await getPendingUpload(binding.uploadId)).toBeNull();
@@ -427,7 +440,11 @@ describe("expired upload reconciliation", () => {
       expect.objectContaining({
         requestId: binding.uploadId,
         result: "failure",
-        after: { reason: "upload_expired" },
+        after: {
+          reason: "upload_expired",
+          channel: "browser",
+          originalFilename: null,
+        },
       }),
     ]);
     expect(await reconcileExpiredUploads()).toEqual({

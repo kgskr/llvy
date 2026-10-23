@@ -89,6 +89,7 @@ export const auditLogs = pgTable(
     actorAccountId: uuid("actor_account_id"),
     actorDiscordUserId: text("actor_discord_user_id"),
     actorAdminGrantId: uuid("actor_admin_grant_id"),
+    actorUploaderGrantId: uuid("actor_uploader_grant_id"),
     actorName: text("actor_name"),
     action: text("action").notNull(),
     targetType: text("target_type").notNull(),
@@ -242,13 +243,20 @@ export const pendingUploads = pgTable(
   {
     id: uuid("id").primaryKey(),
     nonceHash: text("nonce_hash").notNull(),
+    channel: text("channel").notNull().default("browser"),
+    deviceSessionId: uuid("device_session_id"),
     actorRole: text("actor_role"),
     actorMemberId: uuid("actor_member_id"),
     actorCredentialId: uuid("actor_credential_id"),
     actorAccountId: uuid("actor_account_id"),
     actorDiscordUserId: text("actor_discord_user_id"),
     actorAdminGrantId: uuid("actor_admin_grant_id"),
+    actorUploaderGrantId: uuid("actor_uploader_grant_id"),
     actorName: text("actor_name"),
+    auditMetadata: jsonb("audit_metadata").$type<{
+      originalFilename: string | null;
+      failure?: { reason: string; fileHash?: string };
+    }>(),
     pathname: text("pathname").notNull(),
     state: text("state").notNull().default("pending"),
     blobUrl: text("blob_url"),
@@ -342,11 +350,34 @@ export const adminGrants = pgTable(
       .where(sql`${t.revokedAt} is null`),
   ],
 );
+export const uploaderGrants = pgTable(
+  "uploader_grants",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => authAccounts.id, { onDelete: "restrict" }),
+    issuedBy: uuid("issued_by")
+      .notNull()
+      .references(() => authAccounts.id),
+    revokedBy: uuid("revoked_by").references(() => authAccounts.id),
+    issuedAt: timestamp("issued_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    uniqueIndex("uploader_grants_active_account_idx")
+      .on(t.accountId)
+      .where(sql`${t.revokedAt} is null`),
+  ],
+);
 export const authSessions = pgTable(
   "auth_sessions",
   {
     id: uuid("id").defaultRandom().primaryKey(),
     referenceHash: text("reference_hash").notNull().unique(),
+    kind: text("kind").notNull().default("browser"),
     accountId: uuid("account_id")
       .notNull()
       .references(() => authAccounts.id),
@@ -434,3 +465,135 @@ export type Game = typeof games.$inferSelect;
 export type GameParticipant = typeof gameParticipants.$inferSelect;
 export type NewGame = typeof games.$inferInsert;
 export type NewGameParticipant = typeof gameParticipants.$inferInsert;
+
+/** Desktop credentials and jobs have independent retention, never cascade from pending uploads. */
+export const desktopSessions = pgTable(
+  "desktop_sessions",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .references(() => authSessions.id),
+    accountId: uuid("account_id")
+      .notNull()
+      .references(() => authAccounts.id),
+    role: text("role").notNull(),
+    grantId: uuid("grant_id"),
+    uploaderGrantId: uuid("uploader_grant_id"),
+    mode: text("mode").notNull(),
+    scopes: text("scopes").notNull(),
+    name: text("name").notNull().default("LLVY Windows 업로더"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    index("desktop_sessions_account_idx").on(t.accountId),
+    check(
+      "desktop_sessions_mode",
+      sql`${t.mode} in ('transient','persistent')`,
+    ),
+    check(
+      "desktop_sessions_role",
+      sql`${t.role} in ('uploader','admin','owner')`,
+    ),
+  ],
+);
+export const desktopAuthRequests = pgTable(
+  "desktop_auth_requests",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    clientId: text("client_id").notNull(),
+    redirectUri: text("redirect_uri").notNull(),
+    challenge: text("challenge").notNull(),
+    state: text("state").notNull(),
+    mode: text("mode").notNull(),
+    status: text("status").notNull().default("pending"),
+    accountId: uuid("account_id"),
+    browserSessionId: uuid("browser_session_id"),
+    role: text("role"),
+    grantId: uuid("grant_id"),
+    uploaderGrantId: uuid("uploader_grant_id"),
+    replacedSessionId: uuid("replaced_session_id"),
+    codeHash: text("code_hash").unique(),
+    codeExpiresAt: timestamp("code_expires_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+  },
+  (t) => [
+    index("desktop_auth_requests_expiry_idx").on(t.expiresAt),
+    check(
+      "desktop_auth_requests_mode",
+      sql`${t.mode} in ('transient','persistent')`,
+    ),
+  ],
+);
+export const desktopCredentials = pgTable(
+  "desktop_credentials",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    sessionId: uuid("session_id")
+      .notNull()
+      .references(() => desktopSessions.id),
+    kind: text("kind").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    generation: integer("generation").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+  },
+  (t) => [
+    index("desktop_credentials_session_idx").on(t.sessionId),
+    check("desktop_credentials_kind", sql`${t.kind} in ('access','refresh')`),
+  ],
+);
+export const desktopUploadJobs = pgTable(
+  "desktop_upload_jobs",
+  {
+    id: uuid("id").primaryKey(),
+    deviceSessionId: uuid("device_session_id")
+      .notNull()
+      .references(() => desktopSessions.id),
+    accountId: uuid("account_id").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    nonceHash: text("nonce_hash").notNull(),
+    filename: text("filename"),
+    size: integer("size"),
+    lastModified: bigint("last_modified", { mode: "number" }),
+    clientSha256: text("client_sha256"),
+    serverSha256: text("server_sha256"),
+    storeOrigin: text("store_origin").notNull(),
+    pathname: text("pathname").notNull(),
+    state: text("state").notNull().default("pending"),
+    claimId: uuid("claim_id"),
+    claimExpiresAt: timestamp("claim_expires_at", { withTimezone: true }),
+    result: jsonb("result").$type<{ gameId: string; duplicate: boolean }>(),
+    errorCode: text("error_code"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .defaultNow()
+      .notNull(),
+    reservationExpiresAt: timestamp("reservation_expires_at", {
+      withTimezone: true,
+    }).notNull(),
+    resultExpiresAt: timestamp("result_expires_at", {
+      withTimezone: true,
+    }).notNull(),
+    tombstoneExpiresAt: timestamp("tombstone_expires_at", {
+      withTimezone: true,
+    }).notNull(),
+  },
+  (t) => [
+    unique("desktop_upload_jobs_device_key").on(
+      t.deviceSessionId,
+      t.idempotencyKey,
+    ),
+    index("desktop_upload_jobs_retention_idx").on(t.resultExpiresAt),
+  ],
+);

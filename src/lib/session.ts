@@ -6,6 +6,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import { cache } from "react";
 import { cookies } from "next/headers";
 
+import { canManage, canUpload } from "@/lib/capabilities";
 import { SESSION_COOKIE, readSessionToken } from "@/lib/auth";
 import { findSessionActor } from "@/lib/authority";
 import { hashReference } from "@/lib/auth-store";
@@ -53,7 +54,7 @@ export async function getValidSessionToken(): Promise<string | null> {
 export async function assertAdmin() {
   const session = await getSession();
   if (!session) throw new UnauthorizedError();
-  if (session.role === "viewer") throw new ForbiddenError();
+  if (!canManage(session.role)) throw new ForbiddenError();
   return session;
 }
 
@@ -75,5 +76,17 @@ export async function assertSession() {
 export async function assertReadOwner() {
   const session = await assertSession();
   if (session.role !== "owner") throw new ForbiddenError();
+  return session;
+}
+
+export async function assertUploader() {
+  const session = await getSession();
+  if (!session) throw new UnauthorizedError();
+  if (!canUpload(session.role)) throw new ForbiddenError();
+  return session;
+}
+export async function assertReadAdmin() {
+  const session = await assertSession();
+  if (!canManage(session.role)) throw new ForbiddenError();
   return session;
 }

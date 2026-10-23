@@ -22,7 +22,8 @@
     "test:auth-postgres": "node scripts/test-auth-postgres.mjs",
     "typecheck": "tsc --noEmit",
     "check": "npm test && npm run lint && npm run typecheck && npm run build && npm run format",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "desktop:revoke-all": "node scripts/revoke-desktop-connections.mjs"
   },
   "dependencies": {
     "@vercel/analytics": "^2.0.1",

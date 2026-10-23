@@ -34,6 +34,9 @@ vi.mock("@/lib/account-administration", () => ({
 vi.mock("@/lib/auth-maintenance", () => ({
   getAuthenticationMaintenanceStatus: mocks.maintenanceStatus,
 }));
+vi.mock("./users/uploader-controls", () => ({
+  UploaderControls: () => <button>업로더 권한 부여</button>,
+}));
 vi.mock("./users/permission-controls", () => ({
   PermissionControls: ({
     accountId,
@@ -116,9 +119,9 @@ beforeEach(() => {
   mocks.maintenanceStatus.mockResolvedValue(null);
 });
 
-describe("owner-only Discord account UI", () => {
-  it.each([null, { role: "viewer" }, { role: "admin" }])(
-    "blocks non-owner account queries",
+describe("owner and administrator Discord account UI", () => {
+  it.each([null, { role: "viewer" }, { role: "uploader" }])(
+    "blocks viewer/uploader account queries",
     async (session) => {
       mocks.getSession.mockResolvedValue(session);
       await expect(
@@ -193,7 +196,7 @@ describe("owner-only management UI", () => {
     expect(mocks.listAssignments).not.toHaveBeenCalled();
   });
 
-  it.each([null, { role: "viewer" }])(
+  it.each([null, { role: "viewer" }, { role: "uploader" }])(
     "blocks protected management queries before rendering",
     async (session) => {
       mocks.getSession.mockResolvedValue(session);
@@ -329,7 +332,7 @@ describe("owner-only audit page", () => {
     expect(html).toContain("게임 코멘트 수정");
     expect(html).toContain("코멘트: 이전 메모 → 새 메모");
   });
-  it.each([null, { role: "viewer" }, { role: "admin" }])(
+  it.each([null, { role: "viewer" }, { role: "uploader" }, { role: "admin" }])(
     "rejects non-owner access without querying logs",
     async (session) => {
       mocks.getSession.mockResolvedValue(session);
@@ -410,3 +413,61 @@ describe("owner-only audit page", () => {
     ).toContain("표시할 감사로그가 없습니다.");
   });
 });
+
+it("lets admin delegate uploader without rendering owner controls or fetching maintenance", async () => {
+  mocks.getSession.mockResolvedValue({ role: "admin" });
+  mocks.listLoginAccounts.mockResolvedValue({
+    total: 1,
+    accounts: [
+      {
+        id: MEMBER_ID,
+        displayName: "대상",
+        username: "fixture",
+        role: "viewer",
+        status: "active",
+        grantId: null,
+        uploaderGrantId: null,
+        membershipCheckedAt: null,
+        lastLoginAt: new Date(),
+      },
+    ],
+  });
+  const html = renderToStaticMarkup(
+    await UsersPage({ searchParams: Promise.resolve({}) }),
+  );
+  expect(html).toContain("업로더 권한 부여");
+  expect(html).not.toContain("관리자로 지정");
+  expect(mocks.maintenanceStatus).not.toHaveBeenCalled();
+});
+it.each([true, false])(
+  "renders persistent file attribution and game availability (%s)",
+  async (gameExists) => {
+    mocks.listAuditLogs.mockResolvedValue([
+      {
+        ...audit,
+        actorRole: "uploader",
+        actorUploaderGrantId: "grant-snapshot",
+        action: "replay.processed",
+        gameExists,
+        after: {
+          originalFilename: "KR_123.rofl",
+          fileHash: "a".repeat(64),
+          gameId: MEMBER_ID,
+          channel: "desktop",
+        },
+      },
+    ]);
+    const html = renderToStaticMarkup(
+      await AuditPage({ searchParams: Promise.resolve({}) }),
+    );
+    for (const value of [
+      "업로더",
+      "KR_123.rofl",
+      "a".repeat(64),
+      "grant-snapshot",
+      MEMBER_ID,
+    ])
+      expect(html).toContain(value);
+    expect(html.includes(`href="/games/${MEMBER_ID}"`)).toBe(gameExists);
+  },
+);

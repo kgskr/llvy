@@ -1,3 +1,4 @@
+import { canManage } from "@/lib/capabilities";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 
@@ -85,7 +86,7 @@ export default async function AdminPage({
 } = {}) {
   const session = await getReadSession();
   if (!session) redirect("/login?redirectTo=%2Fadmin");
-  if (session.role === "viewer") redirect("/members");
+  if (!canManage(session.role)) redirect("/members");
 
   const [params, memberTotal, accountTotal, memberOptions] = await Promise.all([
     searchParams,
@@ -105,14 +106,16 @@ export default async function AdminPage({
     <div className="stack">
       <div className="page-heading">
         <h1>관리</h1>
-        {session.role === "owner" ? (
+        {canManage(session.role) ? (
           <div className="link-form">
             <Link href="/admin/users" className="button button-secondary">
               사용자 권한
             </Link>
-            <Link href="/admin/audit" className="button button-secondary">
-              감사로그
-            </Link>
+            {session.role === "owner" ? (
+              <Link href="/admin/audit" className="button button-secondary">
+                감사로그
+              </Link>
+            ) : null}
           </div>
         ) : null}
       </div>

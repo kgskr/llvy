@@ -52,3 +52,26 @@
 lint·typecheck·build·format 통과. 문서 대조 시 로그인·계정 저장·업로드 예약·만료 정리 관련
 4개 파일의 테스트 45개를 독립 실행해 통과했다. 2026-10-04 운영 검증 기록은 이전
 마이그레이션 3개와 업로드/경기 관리 흐름에 대한 과거 증거이며 이 후속 변경의 운영 증거가 아니다.
+
+## 7. Replay identity storage limits
+
+- [x] 7.1 PUUID·Riot 게임 이름·태그를 각각 UTF-8 512바이트로 제한하고 파서 및 transaction 전 예산 검사에서 잘라내지 않고 거부한다.
+- [x] 7.2 두 ROFL 형식의 경계값·다중 바이트·초과 값 및 누락 PUUID/빈 태그 호환성을 검증한다.
+- [x] 7.3 웹·desktop 경로의 422/invalid_replay, 실패 감사, 예약 종료, bound Blob 정리 및 경기·계정·참가자 무삽입을 검증한다.
+- [x] 7.4 관련 문서를 갱신하고 전체 check·OpenSpec strict·독립 재리뷰를 완료한다.
+
+## 8. 정규화된 저장 필드 제한
+
+- [x] 8.1 게임 버전·챔피언 256바이트, 원본 파일명 1,024바이트의 UTF-8 상한을 파서와 저장 전 경계에 적용한다.
+- [x] 8.2 경계값·다중 바이트·초과 값 및 웹/desktop 실패 감사·무삽입·정리 회귀 테스트를 통과시킨다.
+- [x] 8.3 구조 안내와 검증 기록을 갱신하고 npm run check·OpenSpec strict·diff 검사를 수행한다. 기존 운영 검증 6.9·6.10은 별도로 유지한다.
+
+2026-10-20 로컬 검증: Node.js 24.21.0, 격리 PostgreSQL 17·Valkey 9에서
+`VITEST_MAX_WORKERS=2 npm run check` 통과(1,041개 통과, 5개 건너뜀).
+추가 회귀는 19개이며 파서·저장 예산·업로더 통합 테스트 3개 파일의 123개 테스트가
+별도 실행에서도 통과했다. 실제 B-tree 인덱스를 사용하는 PGlite에서 최대 길이의
+PUUID와 legacy 이름/태그 저장을 검증했다. 웹·desktop의 감사 및 삭제 검증은
+PGlite와 모의 Blob을 사용했다. 서버 재리뷰와 앱 오류 처리 교차 리뷰의 미해결 지적은 없다.
+`openspec validate --all --strict` 28개 및 staged/unstaged `git diff --check` 통과.
+실제 Windows·Discord·Blob·운영 배포를 검증한 결과는 아니며 기존 6.9·6.10이
+남아 있으므로 이 change는 열린 상태를 유지한다.

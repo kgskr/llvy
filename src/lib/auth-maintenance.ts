@@ -1,4 +1,5 @@
 import "server-only";
+import { cleanupDesktopAuthentication } from "@/lib/desktop/maintenance";
 import {
   and,
   asc,
@@ -25,15 +26,22 @@ import { DiscordBusyError } from "@/lib/discord-circuit";
 import { assertReadOwner } from "@/lib/session";
 
 export async function cleanupExpiredAuthentication() {
+  await cleanupDesktopAuthentication();
   const now = new Date();
   const old = new Date(now.getTime() - 86_400_000);
   const sessions = await db
     .select({ id: authSessions.id })
     .from(authSessions)
     .where(
-      or(
-        lte(authSessions.expiresAt, now),
-        and(isNotNull(authSessions.revokedAt), lt(authSessions.revokedAt, old)),
+      and(
+        eq(authSessions.kind, "browser"),
+        or(
+          lte(authSessions.expiresAt, now),
+          and(
+            isNotNull(authSessions.revokedAt),
+            lt(authSessions.revokedAt, old),
+          ),
+        ),
       ),
     )
     .orderBy(asc(authSessions.expiresAt))

@@ -1,7 +1,9 @@
-vi.mock("@/lib/audit", () => ({ recordAudit: vi.fn(async () => {}) }));
+vi.mock("@/lib/upload-failure", () => ({
+  recordUploadFailure: vi.fn(async () => {}),
+}));
 import { ownerSession, ownerUploadFields } from "@/test/actor";
 import { UnauthorizedError } from "@/lib/auth-errors";
-import { recordAudit } from "@/lib/audit";
+import { recordUploadFailure } from "@/lib/upload-failure";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -196,7 +198,9 @@ describe("POST /api/process", () => {
         token: blobToken,
         abortSignal: expect.any(AbortSignal),
       });
-      expect(finishPendingUpload).toHaveBeenCalledWith(uploadId, "failed");
+      expect(recordUploadFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ uploadId }),
+      );
       expect(console.error).not.toHaveBeenCalled();
     },
   );
@@ -270,8 +274,8 @@ describe("POST /api/process", () => {
     vi.mocked(ingestReplay).mockRejectedValue(
       new RoflParseError("Invalid replay"),
     );
-    vi.mocked(finishPendingUpload).mockRejectedValue(
-      new Error("DB unavailable"),
+    vi.mocked(recordUploadFailure).mockRejectedValue(
+      new Error("Audit unavailable"),
     );
 
     const response = await POST(request());
@@ -282,8 +286,8 @@ describe("POST /api/process", () => {
       token: blobToken,
       abortSignal: expect.any(AbortSignal),
     });
-    expect(finishPendingUpload).toHaveBeenCalledTimes(2);
-    expect(finishPendingUpload).toHaveBeenLastCalledWith(uploadId, "failed");
+    expect(recordUploadFailure).toHaveBeenCalledTimes(1);
+    expect(finishPendingUpload).not.toHaveBeenCalled();
   });
 
   it("preserves the bound blob when a database error leaves the commit outcome unknown", async () => {
@@ -297,7 +301,8 @@ describe("POST /api/process", () => {
       error: "Failed to process the replay.",
     });
     expect(del).not.toHaveBeenCalled();
-    expect(finishPendingUpload).toHaveBeenCalledWith(uploadId, "failed");
+    expect(finishPendingUpload).not.toHaveBeenCalled();
+    expect(recordUploadFailure).not.toHaveBeenCalled();
     expect(console.error).toHaveBeenCalledWith(
       "Replay ingestion failed; preserving blob because commit outcome may be unknown:",
       { uploadId, blobUrl },
@@ -316,7 +321,9 @@ describe("POST /api/process", () => {
       token: blobToken,
       abortSignal: expect.any(AbortSignal),
     });
-    expect(finishPendingUpload).toHaveBeenCalledWith(uploadId, "failed");
+    expect(recordUploadFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ uploadId }),
+    );
   });
 
   it.each(["headers", "body"] as const)(
@@ -359,7 +366,9 @@ describe("POST /api/process", () => {
         token: blobToken,
         abortSignal: expect.any(AbortSignal),
       });
-      expect(finishPendingUpload).toHaveBeenCalledWith(uploadId, "failed");
+      expect(recordUploadFailure).toHaveBeenCalledWith(
+        expect.objectContaining({ uploadId }),
+      );
     },
   );
 
@@ -403,7 +412,9 @@ describe("POST /api/process", () => {
       token: blobToken,
       abortSignal: expect.any(AbortSignal),
     });
-    expect(finishPendingUpload).toHaveBeenCalledWith(uploadId, "failed");
+    expect(recordUploadFailure).toHaveBeenCalledWith(
+      expect.objectContaining({ uploadId }),
+    );
   });
 
   it("does not fetch or delete a blob after a binding claim is rejected", async () => {
@@ -468,12 +479,12 @@ describe("POST /api/process", () => {
     vi.mocked(ingestReplay).mockRejectedValue(new UnauthorizedError());
     expect((await POST(request())).status).toBe(403);
     expect(del).toHaveBeenCalled();
-    expect(recordAudit).toHaveBeenCalledWith(
-      ownerSession,
+    expect(recordUploadFailure).toHaveBeenCalledWith(
       expect.objectContaining({
-        result: "failure",
-        requestId: uploadId,
-        after: { reason: "authority_revoked" },
+        actor: ownerSession,
+        uploadId,
+        reason: "authority_revoked",
+        fileHash: expect.stringMatching(/^[a-f0-9]{64}$/),
       }),
     );
   });

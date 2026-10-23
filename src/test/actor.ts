@@ -14,6 +14,8 @@ export const ownerSession = {
   issuedAt: Date.now(),
 };
 export const ownerUploadFields = {
+  channel: "browser",
+  deviceSessionId: null,
   actorRole: "owner",
   actorName: "서비스 오너",
   actorMemberId: null,
@@ -21,4 +23,6 @@ export const ownerUploadFields = {
   actorAccountId: ownerActor.accountId,
   actorDiscordUserId: ownerActor.discordUserId,
   actorAdminGrantId: null,
+  actorUploaderGrantId: null,
+  auditMetadata: null,
 };

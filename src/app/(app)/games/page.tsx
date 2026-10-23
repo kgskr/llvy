@@ -1,3 +1,4 @@
+import { canManage, canUpload } from "@/lib/capabilities";
 import Link from "next/link";
 
 import { getGameListReadModel } from "@/lib/read-model";
@@ -26,7 +27,7 @@ export default async function GamesPage({
     requestedPage,
     visibility,
   );
-  const isAdmin = role !== "viewer";
+  const isAdmin = canManage(role);
   const canRestore = excluded && isAdmin;
   const viewQuery = excluded ? "view=excluded&" : "";
   const champions = [
@@ -77,7 +78,7 @@ export default async function GamesPage({
         {games.length === 0 ? (
           <p className="empty-state">
             {excluded ? "제외된 경기가 없습니다." : "표시할 경기가 없습니다."}
-            {!excluded && isAdmin ? (
+            {!excluded && canUpload(role) ? (
               <>
                 {" "}
                 <Link href="/upload">리플레이 업로드 →</Link>

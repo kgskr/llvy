@@ -1,12 +1,14 @@
+import { canManage, ROLE_LABELS } from "@/lib/capabilities";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { listLoginAccounts } from "@/lib/account-administration";
 import { getAuthenticationMaintenanceStatus } from "@/lib/auth-maintenance";
 import { getReadSession } from "@/lib/session";
 import { formatDate } from "@/lib/format";
+import { UploaderControls } from "./uploader-controls";
 import { PermissionControls } from "./permission-controls";
 export const dynamic = "force-dynamic";
-const ROLES = { owner: "서비스 오너", admin: "관리자", viewer: "일반 사용자" };
+const ROLES = ROLE_LABELS;
 export default async function UsersPage({
   searchParams,
 }: {
@@ -14,7 +16,7 @@ export default async function UsersPage({
 }) {
   const session = await getReadSession();
   if (!session) redirect("/login?redirectTo=%2Fadmin%2Fusers");
-  if (session.role !== "owner") redirect("/");
+  if (!canManage(session.role)) redirect("/");
   const params = await searchParams;
   const q = typeof params.q === "string" ? params.q.slice(0, 64) : "";
   const requested =
@@ -23,7 +25,9 @@ export default async function UsersPage({
       : 1;
   const [initial, maintenance] = await Promise.all([
     listLoginAccounts(q, 50, (requested - 1) * 50),
-    getAuthenticationMaintenanceStatus(),
+    session.role === "owner"
+      ? getAuthenticationMaintenanceStatus()
+      : Promise.resolve(null),
   ]);
   const pages = Math.max(1, Math.ceil(initial.total / 50));
   const page = Math.min(requested, pages);
@@ -48,27 +52,29 @@ export default async function UsersPage({
       <section className="card stack">
         <p>
           Discord 로그인으로 등록된 사용자입니다. 가입 여부는 하루 1회 정리하며
-          관리자 지정 시 다시 확인합니다.
+          업로더·관리자 권한 부여 시 다시 확인합니다.
         </p>
-        <p className="muted">
-          마지막 전체 정리:{" "}
-          {maintenance?.lastCompletedAt
-            ? formatDate(maintenance.lastCompletedAt)
-            : "아직 없음"}{" "}
-          ·{" "}
-          {maintenance
-            ? (statusLabels[maintenance.status] ?? maintenance.status)
-            : "실행 전"}
-          {maintenance
-            ? " · 확인 " +
-              maintenance.examined +
-              "명 · 정지 " +
-              maintenance.suspended +
-              "명 · 오류 " +
-              maintenance.failed +
-              "회"
-            : ""}
-        </p>
+        {session.role === "owner" ? (
+          <p className="muted">
+            마지막 전체 정리:{" "}
+            {maintenance?.lastCompletedAt
+              ? formatDate(maintenance.lastCompletedAt)
+              : "아직 없음"}{" "}
+            ·{" "}
+            {maintenance
+              ? (statusLabels[maintenance.status] ?? maintenance.status)
+              : "실행 전"}
+            {maintenance
+              ? " · 확인 " +
+                maintenance.examined +
+                "명 · 정지 " +
+                maintenance.suspended +
+                "명 · 오류 " +
+                maintenance.failed +
+                "회"
+              : ""}
+          </p>
+        ) : null}
         <form method="get" className="link-form">
           <label htmlFor="user-search">사용자 검색</label>
           <input
@@ -90,7 +96,7 @@ export default async function UsersPage({
                   <th>접근 상태</th>
                   <th>권한</th>
                   <th>마지막 가입 확인</th>
-                  <th>관리자 지정</th>
+                  <th>권한 변경</th>
                 </tr>
               </thead>
               <tbody>
@@ -119,13 +125,20 @@ export default async function UsersPage({
                     <td>
                       {account.role === "owner" ? (
                         "환경변수 지정"
-                      ) : (
+                      ) : session.role === "owner" ? (
                         <PermissionControls
                           accountId={account.id}
                           administrator={!!account.grantId}
                           suspended={account.status !== "active"}
                         />
-                      )}
+                      ) : null}
+                      {account.role !== "owner" && !account.grantId ? (
+                        <UploaderControls
+                          accountId={account.id}
+                          uploader={!!account.uploaderGrantId}
+                          suspended={account.status !== "active"}
+                        />
+                      ) : null}
                     </td>
                   </tr>
                 ))}

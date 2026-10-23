@@ -73,6 +73,27 @@ describe("POST /api/blob/upload", () => {
     });
   });
 
+  it("accepts uploader token issuance only for its uploader grant", async () => {
+    const grant = crypto.randomUUID();
+    vi.mocked(getSession).mockResolvedValue({
+      ...ownerSession,
+      role: "uploader",
+      uploaderGrantId: grant,
+    });
+    vi.mocked(getPendingUpload).mockResolvedValue({
+      ...pending,
+      actorRole: "uploader",
+      actorUploaderGrantId: grant,
+    });
+    expect((await POST(request())).status).toBe(200);
+    vi.mocked(getPendingUpload).mockResolvedValue({
+      ...pending,
+      actorRole: "uploader",
+      actorUploaderGrantId: crypto.randomUUID(),
+    });
+    expect((await POST(request())).status).toBe(400);
+  });
+
   it("issues a bounded token that cannot overwrite a stored replay", async () => {
     const response = await POST(request());
 

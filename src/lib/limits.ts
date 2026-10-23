@@ -56,6 +56,18 @@ export const REPLAY_INGEST_LIMITS: ReplayIngestLimits = {
   maxRawValueChars: 256,
 };
 
+/** Fixed ceiling for indexed identity text, independent of parser test budgets.
+ * The legacy game-name/tag-line composite is at most 1,024 bytes; the PUUID
+ * key is at most 512, leaving ample room for PostgreSQL B-tree tuple overhead.
+ */
+export const MAX_REPLAY_IDENTITY_BYTES = 512;
+
+/** Fixed limits for normalized columns, independent of diagnostic JSON caps. */
+export const MAX_REPLAY_GAME_VERSION_BYTES = 256;
+export const MAX_REPLAY_CHAMPION_BYTES = 256;
+// Accommodates every filename allowed by the desktop 255-code-unit contract.
+export const MAX_REPLAY_FILENAME_BYTES = 1024;
+
 /** Upload size cap shared by the Blob token route and the process route. */
 export const MAX_UPLOAD_BYTES = 64 * 1024 * 1024;
 

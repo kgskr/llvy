@@ -29,7 +29,7 @@ export function cacheTtl(policy: CachePolicy, value: unknown) {
 
 type CacheIdentity = {
   query: string;
-  role: "viewer" | "admin" | "owner";
+  role: "viewer" | "uploader" | "admin" | "owner";
   args?: readonly unknown[];
   policy?: CachePolicy;
   admit?: boolean;
@@ -72,7 +72,9 @@ export async function cachedQuery<T>(
       : await budget.run(() => getQueryCacheGeneration(connection));
     if (!generation) return loader();
     const digest = createHash("sha256")
-      .update(JSON.stringify(identity.args ?? []))
+      .update(
+        JSON.stringify(["member-birth-years-v2", ...(identity.args ?? [])]),
+      )
       .digest("hex");
     key = `${prefix}:${generation}:${identity.role}:${identity.query}:${digest}`;
     const stored = await measureCache("cache_read_ms", () =>

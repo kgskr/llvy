@@ -1,6 +1,7 @@
 import "server-only";
 
 import type { PendingUpload } from "@/db/schema";
+import { canUpload } from "@/lib/capabilities";
 import type { Actor } from "@/lib/auth";
 
 export function matchesUploadActor(
@@ -9,9 +10,11 @@ export function matchesUploadActor(
 ): boolean {
   return (
     !!row &&
-    actor.role !== "viewer" &&
+    (row.channel ?? "browser") === "browser" &&
+    canUpload(actor.role) &&
     row.actorRole === actor.role &&
     row.actorAccountId === actor.accountId &&
-    row.actorAdminGrantId === actor.adminGrantId
+    row.actorAdminGrantId === actor.adminGrantId &&
+    (row.actorUploaderGrantId ?? null) === (actor.uploaderGrantId ?? null)
   );
 }

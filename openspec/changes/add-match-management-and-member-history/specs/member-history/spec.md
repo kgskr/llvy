@@ -18,7 +18,7 @@ The system SHALL provide authenticated member-list and member-detail pages. A de
 
 ### Requirement: Present member information with one detail link
 
-The member-list page SHALL use the heading ‘모임원 정보’. Each member's name SHALL link to the member-detail page and display as `name(birthYear)` when an admin or owner views a recorded birth year, or as the name alone otherwise. Viewer payloads and HTML MUST omit birth years. The member card SHALL NOT include a separate ‘전적 보기’ link to the same page.
+The member-list page SHALL use the heading ‘모임원 정보’. Each member's name SHALL link to the member-detail page and display as `name(birthYear)` when any authenticated role views a recorded birth year, or as the name alone otherwise. Viewer and uploader payloads and HTML SHALL include recorded birth years on this member surface. The member card SHALL NOT include a separate ‘전적 보기’ link to the same page.
 
 #### Scenario: Member has a birth year
 
@@ -113,9 +113,9 @@ A game SHALL count once per member. When multiple participant accounts in the sa
 
 ### Requirement: Viewer member links omit birth years
 
-The member list SHALL preserve original names for all authenticated roles while withholding birth years from viewers.
+The member list SHALL preserve original names for all authenticated roles and expose recorded birth years to viewer, uploader, admin and owner.
 
 #### Scenario: Viewer opens a member list
 
 - **WHEN** a viewer opens the list for a member with a recorded birth year
-- **THEN** the link displays only the original name and no birth year is present in delivered data
+- **THEN** the link displays the original name with the recorded birth year and delivered member data contains that birth year

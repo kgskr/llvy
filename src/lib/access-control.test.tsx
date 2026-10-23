@@ -180,7 +180,7 @@ import GameDetailPage from "@/app/(app)/games/[id]/page";
 import MembersPage from "@/app/(app)/members/page";
 import MemberHistoryPage from "@/app/(app)/members/[id]/page";
 
-async function sessionToken(role: "viewer" | "admin" | "owner") {
+async function sessionToken(role: "viewer" | "uploader" | "admin" | "owner") {
   const reference = randomReference();
   mocks.actors.set(createHash("sha256").update(reference).digest("hex"), {
     role,
@@ -328,6 +328,14 @@ describe("actual session authorization at mutation entry points", () => {
     for (const write of WRITES) expect(write).not.toHaveBeenCalled();
   });
 
+  it("rejects uploader management actions even with forged form role", async () => {
+    mocks.token = await sessionToken("uploader");
+    await expect(assertAdmin()).rejects.toBeInstanceOf(ForbiddenError);
+    for (const action of MUTATIONS)
+      expect((await action(null, mutationForm()))?.status).toBe("error");
+    for (const write of WRITES) expect(write).not.toHaveBeenCalled();
+  });
+
   it("rejects viewer upload reservations independently of Proxy", async () => {
     mocks.token = await sessionToken("viewer");
     const response = await reserveUpload(
@@ -407,7 +415,7 @@ describe("actual session authorization at mutation entry points", () => {
     for (const write of WRITES) expect(write).toHaveBeenCalled();
   });
 
-  it.each(["admin", "owner"] as const)(
+  it.each(["uploader", "admin", "owner"] as const)(
     "preserves %s upload access and its original budget identity",
     async (role) => {
       mocks.token = await sessionToken(role);
@@ -423,6 +431,7 @@ describe("actual session authorization at mutation entry points", () => {
       expect(mocks.createPendingUpload).toHaveBeenCalledExactlyOnceWith(
         mocks.token,
         expect.objectContaining({ role }),
+        "match.rofl",
       );
     },
   );
@@ -466,7 +475,7 @@ describe("login and route authorization", () => {
     },
   );
 
-  it.each(["admin", "owner"] as const)(
+  it.each(["uploader", "admin", "owner"] as const)(
     "allows %s read and upload paths",
     async (role) => {
       mocks.token = await sessionToken(role);
@@ -581,7 +590,7 @@ describe("verified role visibility", () => {
     );
   });
 
-  it.each(["viewer", "admin", "owner"] as const)(
+  it.each(["viewer", "uploader", "admin", "owner"] as const)(
     "restricts member management links for %s, including empty and ambiguous records",
     async (role) => {
       mocks.token = await sessionToken(role);
@@ -595,7 +604,9 @@ describe("verified role visibility", () => {
         mocks.listMembers.mockResolvedValue(members);
         const html = renderToStaticMarkup(await MembersPage());
         expect(html).toContain("모임원 정보");
-        expect(html.includes('href="/admin"')).toBe(role !== "viewer");
+        expect(html.includes('href="/admin"')).toBe(
+          role === "admin" || role === "owner",
+        );
       }
       mocks.getMemberHistory.mockResolvedValue({
         member,
@@ -635,11 +646,13 @@ describe("verified role visibility", () => {
       expect(html).toContain("조회 모임원의 전적");
       expect(html).toContain("계정 중복 연결 확인");
       expect(html).toContain("집계할 포지션 전적이 없습니다.");
-      expect(html.includes('href="/admin"')).toBe(role !== "viewer");
+      expect(html.includes('href="/admin"')).toBe(
+        role === "admin" || role === "owner",
+      );
     },
   );
 
-  it.each(["viewer", "admin", "owner"] as const)(
+  it.each(["viewer", "uploader", "admin", "owner"] as const)(
     "renders navigation for %s",
     async (role) => {
       mocks.token = await sessionToken(role);
@@ -651,16 +664,20 @@ describe("verified role visibility", () => {
           ? "서비스 오너"
           : role === "admin"
             ? "관리자"
-            : "일반 사용자",
+            : role === "uploader"
+              ? "업로더"
+              : "일반 사용자",
       );
-      expect(html.includes('href="/admin"')).toBe(role !== "viewer");
+      expect(html.includes('href="/admin"')).toBe(
+        role === "admin" || role === "owner",
+      );
       expect(html).toContain('href="/members"');
       expect(html.includes('href="/upload"')).toBe(role !== "viewer");
       expect(html).toContain('href="/games"');
     },
   );
 
-  it.each(["viewer", "admin", "owner"] as const)(
+  it.each(["viewer", "uploader", "admin", "owner"] as const)(
     "renders game reads and restricts controls for %s",
     async (role) => {
       mocks.token = await sessionToken(role);
@@ -676,16 +693,18 @@ describe("verified role visibility", () => {
           }),
         );
         expect(html).toContain("게임 상세");
-        expect(html.includes('data-management="date"')).toBe(role !== "viewer");
+        expect(html.includes('data-management="date"')).toBe(
+          role === "admin" || role === "owner",
+        );
         expect(html.includes('data-management="comment"')).toBe(
-          role !== "viewer",
+          role === "admin" || role === "owner",
         );
         expect(html).toContain("공유 코멘트");
         expect(
           html.includes(
             `data-management="${excluded ? "restore" : "exclude"}"`,
           ),
-        ).toBe(role !== "viewer");
+        ).toBe(role === "admin" || role === "owner");
       }
       const list = renderToStaticMarkup(
         await GamesPage({
@@ -694,7 +713,7 @@ describe("verified role visibility", () => {
       );
       expect(list).toContain("상세");
       expect(list.includes('data-management="restore"')).toBe(
-        role !== "viewer",
+        role === "admin" || role === "owner",
       );
     },
   );

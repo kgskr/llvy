@@ -9,6 +9,8 @@ Codex Security scan `ed4196b0-0a96-410c-a233-aa894da68f5f` reported three issues
 - Limit reservations to ten per account and fifty app-wide per 24-hour window.
 - Reconcile expired uploads through a daily authenticated maintenance route, preserving every Blob referenced by a stored game.
 - Bound participant count, input JSON size/depth, retained diagnostic fields, and ingestion work before transactions.
+- Reject replay PUUID, Riot game name and tag line exceeding 512 UTF-8 bytes each before database writes, preserving the existing web/desktop invalid-replay failure and audit paths.
+- Bound normalized game version and champion text to 256 UTF-8 bytes and original filenames to 1,024 UTF-8 bytes before storage, independently of diagnostic JSON limits.
 - Cover identity selection, atomic budgets, binding replay, safe deletion, parser limits, and cleanup recovery with regressions.
 
 ## Capabilities

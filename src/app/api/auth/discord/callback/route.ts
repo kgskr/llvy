@@ -1,3 +1,4 @@
+import { canManage, canUpload } from "@/lib/capabilities";
 import { NextResponse, type NextRequest } from "next/server";
 import {
   AuthConfigurationError,
@@ -84,8 +85,8 @@ export async function GET(request: NextRequest) {
     const session = await completeDiscordLogin(user, check);
     const path = new URL(attempt.redirectTo, "https://llvy.invalid").pathname;
     const destination =
-      (session.role === "viewer" &&
-        (isAdminPath(path) || path === "/upload")) ||
+      (!canManage(session.role) && isAdminPath(path)) ||
+      (!canUpload(session.role) && path === "/upload") ||
       (session.role !== "owner" && isOwnerPath(path))
         ? "/"
         : attempt.redirectTo;

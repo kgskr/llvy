@@ -6,7 +6,7 @@
 - [JSON 스키마](schema.json)
 - [비밀 없는 fixture](fixtures.json)
 
-전송 헤더는 설치된 `@vercel/blob` 2.5.0 소스와 타입에 맞춘 후보이다. public/private 실제 PUT, 변조·만료·overwrite 검증 후 확정한다. 제품 origin은 `https://llvy.my`다.
+전송 헤더는 설치된 `@vercel/blob` 2.5.0 소스와 타입에 맞춘 후보이다. public/private 실제 PUT, 변조·만료·overwrite 검증 후 확정한다. 제품 앱은 빌드의 필수 `LLVY_SERVER_ORIGIN`으로 HTTPS origin을 고정한다. `protocol.json`의 `productOrigin`은 고정 시점의 계약 메타데이터로 유지하며 앱 런타임의 주소 기본값으로 사용하지 않는다.
 정의 중인 인증·전송 계약은 [서버 OpenSpec](../../openspec/changes/add-desktop-replay-upload-api/specs/)이 기준이다.
 완료 후에는 LLVY의 정식 명세와 함께 관리한다.
 
@@ -32,3 +32,9 @@ LLVY는 지원 중인 v1 exe의 응답 의미·필수 헤더를 깨지 않게 �
 `DESKTOP_UPLOADER_ENABLED` 기본 false를 구현했다. 기존 웹 URL·DTO는 유지한다.
 업로더는 LLVY와 승인된 Blob 주소에 직접 연결한다. Worker와 QStash를 필요로 하지 않는다.
 서버 구현 작업과 실환경 검증이 끝나기 전에는 이 정책을 구현 완료로 해석하지 않는다.
+
+## 업로더 역할 확장
+
+`schema.json`의 session role은 `uploader`, `admin`, `owner`를 허용한다. `fixtures.json`은 기존 admin `session`을 보존하고 `uploaderSession`을 추가한다. viewer는 desktop 승인을 받을 수 없다. 엄격한 구버전 앱은 uploader 응답을 거부할 수 있으므로 이를 admin으로 위장하지 않는다.
+
+새 계약 commit 확정 → 앱 고정 사본/source.json/hash 갱신과 Go 검사 → 호환 서버/앱 배포 → 실제 Windows·Discord·Blob 수용 검증 → uploader 권한 활성화 순서다. 현재 앱 고정 revision은 로컬 `fe32e8a93a426b0446338d24c201c5b778dab682`이며 LLVY의 별도 `uploader-role-contract` ref와 사본/hash를 대조했다. 이 ref는 아직 원격 게시하지 않았고 서버 main·운영 배포와 구분한다. 로컬 파서 호환 수정만으로 릴리스 준비 완료로 판단하지 않는다.

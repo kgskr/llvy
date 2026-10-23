@@ -32,7 +32,7 @@ Query results SHALL use named retention policies after current authoritative dep
 #### Scenario: Member or linked account changes during the day
 
 - **WHEN** a member name, birth year, deletion, account link or accepted Riot ID change commits while the previous member-list entry is unexpired
-- **THEN** subsequent reads SHALL use the new dependency revisions immediately while preserving role projection and excluding birth years from viewer results
+- **THEN** subsequent reads SHALL use the new dependency revisions immediately while preserving role projection and including birth years for all authenticated roles on existing member-read surfaces
 
 ### Requirement: Cache failures fail fast
 

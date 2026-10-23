@@ -1,3 +1,4 @@
+import { canUpload } from "@/lib/capabilities";
 import { NextResponse } from "next/server";
 
 import { getBlobStoreConfig } from "@/lib/blob-store";
@@ -30,7 +31,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (session.role === "viewer")
+  if (!canUpload(session.role))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   let body: UploadsBody;
@@ -70,7 +71,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   }
   let created;
   try {
-    created = await createPendingUpload(session.token, session);
+    created = await createPendingUpload(session.token, session, filename);
   } catch (error) {
     if (error instanceof UploadBudgetExceeded) {
       return NextResponse.json(

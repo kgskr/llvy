@@ -75,6 +75,8 @@ import {
   AccountIneligibleError,
   grantAdministrator,
   revokeAdministrator,
+  grantUploader,
+  revokeUploader,
 } from "@/lib/account-administration";
 import { createLoginAttempt, consumeLoginAttempt } from "@/lib/oauth-attempts";
 
@@ -85,6 +87,25 @@ import { setGameExcluded, setGamePlayedAt } from "./game-mutations";
 import { ingestReplay } from "./ingest";
 import { replayBytes, replayPlayer } from "@/test/replay";
 import { eq } from "drizzle-orm";
+import { createHash } from "node:crypto";
+import {
+  startAuthorization,
+  approveAuthorization,
+  exchangeAuthorization,
+  refreshAuthorization,
+  revokeOwnDevice,
+} from "@/lib/desktop/auth-store";
+import { credentialActor } from "@/lib/desktop/authority";
+import {
+  reserveUpload,
+  sessionInfo,
+  uploadStatus,
+} from "@/lib/desktop/upload-store";
+import { ingestionFinalizer } from "@/lib/desktop/process";
+import { CLIENT_ID, pkce } from "@/lib/desktop/protocol";
+import { cleanupExpiredAuthorizationRequests } from "@/lib/desktop/auth-request-cleanup";
+import { consumeRequestBudgets } from "@/lib/request-budget";
+import { createPendingUpload } from "@/lib/pending-upload-store";
 
 const OWNER_USER = "111111111111111111";
 const TARGET_USER = "444444444444444444";
@@ -116,7 +137,7 @@ describe.skipIf(!process.env.LLVY_POSTGRES_TEST_URL)(
     }, 30_000);
     beforeEach(async () => {
       await state.pool!.query(
-        "TRUNCATE auth_membership_decisions, audit_logs, admin_grants, auth_sessions, auth_accounts, pending_uploads, oauth_login_attempts, discord_api_controls, request_budgets, game_participants, games, riot_accounts, members CASCADE",
+        "TRUNCATE desktop_auth_requests, auth_membership_decisions, audit_logs, admin_grants, auth_sessions, auth_accounts, pending_uploads, oauth_login_attempts, discord_api_controls, request_budgets, game_participants, games, riot_accounts, members CASCADE",
       );
       state.queries = [];
       vi.stubEnv("REDIS_URL", "");
@@ -165,6 +186,583 @@ describe.skipIf(!process.env.LLVY_POSTGRES_TEST_URL)(
       ).token;
       return (await getSession())!;
     }
+
+    async function loginTarget(userId = TARGET_USER) {
+      const result = await completeDiscordLogin(
+        { id: userId, username: "fixture", displayName: "Fixture" },
+        {
+          userId,
+          guildId: GUILD,
+          version: 1,
+          status: "member",
+          checkedAt: new Date(),
+        },
+      );
+      state.token = result.token;
+      return (await getSession())!;
+    }
+    function memberLookup() {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (url: string) =>
+          Response.json({
+            user: { id: String(url).split("/").at(-1) },
+            pending: false,
+          }),
+        ),
+      );
+    }
+    async function loginUploader() {
+      const target = await loginTarget();
+      await loginCacheOwner();
+      memberLookup();
+      await grantUploader(target.accountId);
+      const ownerToken = state.token;
+      state.token = target.token;
+      const actor = (await getSession())!;
+      state.token = ownerToken;
+      return actor;
+    }
+    it("serializes concurrent uploader grants and admin promotion without active overlap", async () => {
+      const target = await loginTarget();
+      await loginCacheOwner();
+      memberLookup();
+      const outcomes = await Promise.allSettled([
+        grantUploader(target.accountId),
+        grantUploader(target.accountId),
+      ]);
+      expect(outcomes.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      await revokeUploader(target.accountId);
+      const transitions = await Promise.allSettled([
+        grantUploader(target.accountId),
+        grantAdministrator(target.accountId),
+      ]);
+      expect(transitions.some((r) => r.status === "fulfilled")).toBe(true);
+      expect(
+        (await db.select().from(schema.adminGrants)).filter(
+          (g) => g.revokedAt === null,
+        ),
+      ).toHaveLength(1);
+      expect(
+        (await db.select().from(schema.uploaderGrants)).filter(
+          (g) => g.revokedAt === null,
+        ),
+      ).toHaveLength(0);
+    });
+    it.each(["member", "absent", "pending"] as const)(
+      "rejects a grant and its %s membership result when its admin issuer is revoked during the provider lookup",
+      async (status) => {
+        const target = await loginTarget("555555555555555555");
+        const admin = await loginTarget();
+        await loginCacheOwner();
+        const ownerToken = state.token;
+        memberLookup();
+        await grantAdministrator(admin.accountId);
+        let entered!: () => void, release!: () => void;
+        const entry = new Promise<void>((r) => {
+            entered = r;
+          }),
+          gate = new Promise<void>((r) => {
+            release = r;
+          });
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async () => {
+            entered();
+            await gate;
+            return status === "absent"
+              ? Response.json({ code: 10007 }, { status: 404 })
+              : Response.json({
+                  user: { id: target.discordUserId },
+                  pending: status === "pending",
+                });
+          }),
+        );
+        state.token = admin.token;
+        const granting = grantUploader(target.accountId);
+        const outcome = Promise.allSettled([granting]);
+        await entry;
+        state.token = ownerToken;
+        try {
+          await revokeAdministrator(admin.accountId);
+        } finally {
+          release();
+        }
+        expect((await outcome)[0].status).toBe("rejected");
+        expect(await db.select().from(schema.uploaderGrants)).toHaveLength(0);
+        expect(
+          (
+            await db
+              .select()
+              .from(schema.authAccounts)
+              .where(eq(schema.authAccounts.id, target.accountId))
+          )[0].status,
+        ).toBe("active");
+        expect(
+          (
+            await db
+              .select()
+              .from(schema.authSessions)
+              .where(eq(schema.authSessions.id, target.sessionId))
+          )[0].revokedAt,
+        ).toBeNull();
+        expect(
+          (await db.select().from(schema.auditLogs)).filter(
+            (row) => row.action === "auth.account_suspended",
+          ),
+        ).toHaveLength(0);
+      },
+    );
+    it.each(["absent", "pending"] as const)(
+      "does not apply a delayed %s uploader-grant denial after the target becomes admin",
+      async (status) => {
+        const target = await loginTarget();
+        await loginCacheOwner();
+        let entered!: () => void;
+        const entry = new Promise<void>((r) => {
+          entered = r;
+        });
+        const blocker = await state.pool!.connect();
+        try {
+          await blocker.query("BEGIN");
+          await blocker.query(
+            "SELECT id FROM auth_accounts WHERE id = $1 FOR UPDATE",
+            [target.accountId],
+          );
+          // Let promotion finish its provider lookup first, then queue at the
+          // account lock. The bot permit serializes provider requests, so a
+          // second lookup must not wait behind an artificially paused fetch.
+          memberLookup();
+          const promotion = Promise.allSettled([
+            grantAdministrator(target.accountId),
+          ]);
+          await waitForLock(false);
+          vi.stubGlobal(
+            "fetch",
+            vi.fn(async () => {
+              entered();
+              return status === "absent"
+                ? Response.json({ code: 10007 }, { status: 404 })
+                : Response.json({
+                    user: { id: target.discordUserId },
+                    pending: true,
+                  });
+            }),
+          );
+          const outcome = Promise.allSettled([grantUploader(target.accountId)]);
+          await entry;
+          await blocker.query("COMMIT");
+          expect((await promotion)[0].status).toBe("fulfilled");
+          expect((await outcome)[0]).toMatchObject({
+            status: "rejected",
+            reason: expect.any(AccountIneligibleError),
+          });
+        } finally {
+          await blocker.query("ROLLBACK");
+          blocker.release();
+        }
+        expect(
+          (
+            await db
+              .select()
+              .from(schema.authAccounts)
+              .where(eq(schema.authAccounts.id, target.accountId))
+          )[0].status,
+        ).toBe("active");
+        expect(
+          (await db.select().from(schema.adminGrants))[0].revokedAt,
+        ).toBeNull();
+        expect(
+          (
+            await db
+              .select()
+              .from(schema.authSessions)
+              .where(eq(schema.authSessions.id, target.sessionId))
+          )[0].revokedAt,
+        ).toBeNull();
+        expect(
+          (await db.select().from(schema.auditLogs)).filter(
+            (row) => row.action === "auth.account_suspended",
+          ),
+        ).toHaveLength(0);
+      },
+    );
+    for (const transition of ["revoke", "promote", "leave"] as const) {
+      it(`serializes uploader final commit before ${transition} and rejects the stale actor afterward`, async () => {
+        const uploader = await loginUploader();
+        const { actor } = await desktopDevice(uploader);
+        const job = await claimed(actor, "uploader-concurrency-key");
+        let entered!: () => void, release!: () => void;
+        const entry = new Promise<void>((r) => {
+            entered = r;
+          }),
+          gate = new Promise<void>((r) => {
+            release = r;
+          });
+        const writing = ingestReplay({
+          bytes: desktopBytes,
+          blobUrl: "https://fixture.invalid/uploader-commit",
+          originalFilename: desktopMetadata.filename,
+          lastModified: null,
+          actor,
+          uploadId: job.binding.uploadId,
+          desktop: {
+            lock: job.hook.lock,
+            finalize: async (tx, result, hash) => {
+              await job.hook.finalize(tx, result, hash);
+              entered();
+              await gate;
+            },
+          },
+        });
+        const written = Promise.allSettled([writing]);
+        await entry;
+        const mutation =
+          transition === "revoke"
+            ? revokeUploader(uploader.accountId)
+            : transition === "promote"
+              ? grantAdministrator(uploader.accountId)
+              : saveMembership({
+                  userId: uploader.discordUserId,
+                  guildId: GUILD,
+                  status: "absent",
+                  version: Date.now() + 1000,
+                  checkedAt: new Date(),
+                });
+        const changed = Promise.allSettled([mutation]);
+        try {
+          await waitForLock(false);
+        } finally {
+          release();
+        }
+        expect((await written)[0].status).toBe("fulfilled");
+        expect((await changed)[0].status).toBe("fulfilled");
+        expect(await db.select().from(schema.games)).toHaveLength(1);
+        await expect(
+          ingestReplay({
+            bytes: desktopBytes,
+            blobUrl: "https://fixture.invalid/stale",
+            originalFilename: "stale.rofl",
+            lastModified: null,
+            actor: uploader,
+          }),
+        ).rejects.toThrow();
+        await expect(sessionInfo(actor)).rejects.toThrow();
+        expect(
+          (await db.select().from(schema.uploaderGrants)).every(
+            (g) => g.revokedAt !== null,
+          ),
+        ).toBe(true);
+      });
+    }
+
+    async function desktopApproval(
+      actor: Awaited<ReturnType<typeof loginCacheOwner>>,
+    ) {
+      vi.stubEnv("DESKTOP_UPLOADER_ENABLED", "true");
+      vi.stubEnv("BLOB_READ_WRITE_TOKEN", "vercel_blob_rw_fixture_test");
+      const verifier = "v".repeat(43),
+        redirectUri = "http://127.0.0.1:43123/callback";
+      const request = await startAuthorization(
+        {
+          clientId: CLIENT_ID,
+          redirectUri,
+          state: randomReference(),
+          codeChallenge: pkce(verifier),
+          codeChallengeMethod: "S256",
+          mode: "persistent",
+        },
+        crypto.randomUUID(),
+      );
+      const callback = await approveAuthorization(
+        actor,
+        request.requestId,
+        "approve",
+      );
+      return {
+        clientId: CLIENT_ID,
+        redirectUri,
+        code: new URL(callback!).searchParams.get("code"),
+        codeVerifier: verifier,
+      };
+    }
+    async function desktopDevice(
+      actor: Awaited<ReturnType<typeof loginCacheOwner>>,
+    ) {
+      const tokens = await exchangeAuthorization(
+        await desktopApproval(actor),
+        crypto.randomUUID(),
+      );
+      return {
+        tokens,
+        actor: await credentialActor(tokens.accessToken, "access"),
+      };
+    }
+    const desktopBytes = replayBytes();
+    const desktopMetadata = {
+      filename: "KR_123.rofl",
+      size: desktopBytes.length,
+      lastModified: Date.now(),
+      clientSha256: createHash("sha256").update(desktopBytes).digest("hex"),
+    };
+    it("cleans disjoint expired batches while skipping an authorization row locked by another connection", async () => {
+      const now = Date.now();
+      const ids = Array.from({ length: 22 }, () => crypto.randomUUID());
+      const data = {
+        clientId: CLIENT_ID,
+        redirectUri: "http://127.0.0.1:43123/callback",
+        state: randomReference(),
+        challenge: pkce("v".repeat(43)),
+        mode: "transient",
+      };
+      await db.insert(schema.desktopAuthRequests).values(
+        ids.map((id, i) => ({
+          ...data,
+          id,
+          expiresAt: new Date(i === 21 ? now + 600000 : now - 10000 + i),
+        })),
+      );
+      const blocker = await state.pool!.connect();
+      try {
+        await blocker.query("BEGIN");
+        await blocker.query(
+          "SELECT id FROM desktop_auth_requests WHERE id = $1 FOR UPDATE",
+          [ids[0]],
+        );
+        expect(
+          await Promise.all([
+            cleanupExpiredAuthorizationRequests(10),
+            cleanupExpiredAuthorizationRequests(10),
+          ]),
+        ).toEqual([10, 10]);
+        expect(
+          (await db.select().from(schema.desktopAuthRequests))
+            .map((r) => r.id)
+            .sort(),
+        ).toEqual([ids[0], ids[21]].sort());
+      } finally {
+        await blocker.query("ROLLBACK");
+        blocker.release();
+      }
+      vi.stubEnv("DESKTOP_UPLOADER_ENABLED", "true");
+      const { challenge, ...start } = data;
+      await startAuthorization(
+        { ...start, codeChallenge: challenge, codeChallengeMethod: "S256" },
+        "cleanup-ip",
+      );
+      const remaining = await db.select().from(schema.desktopAuthRequests);
+      expect(remaining).toHaveLength(2);
+      expect(remaining.some((r) => r.id === ids[21])).toBe(true);
+      expect(remaining.every((r) => r.expiresAt.getTime() > now)).toBe(true);
+    });
+    it("consumes desktop authorization once across simultaneous exchanges", async () => {
+      const actor = await loginCacheOwner();
+      const body = await desktopApproval(actor);
+      const outcomes = await Promise.allSettled([
+        exchangeAuthorization(body, "ip-a"),
+        exchangeAuthorization(body, "ip-b"),
+      ]);
+      expect(outcomes.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      expect(await db.select().from(schema.desktopSessions)).toHaveLength(1);
+    });
+    it("commits refresh replay revocation under concurrent rotation", async () => {
+      const { tokens, actor } = await desktopDevice(await loginCacheOwner());
+      const outcomes = await Promise.allSettled([
+        refreshAuthorization({ refreshToken: tokens.refreshToken }, "ip-a"),
+        refreshAuthorization({ refreshToken: tokens.refreshToken }, "ip-b"),
+      ]);
+      expect(outcomes.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      await expect(sessionInfo(actor)).rejects.toThrow();
+      expect(
+        (await db.select().from(schema.desktopSessions))[0].revokedAt,
+      ).not.toBeNull();
+    });
+    it("serializes identical desktop reservation keys without a second budget debit", async () => {
+      const { actor } = await desktopDevice(await loginCacheOwner());
+      const results = await Promise.all(
+        Array.from({ length: 4 }, () =>
+          reserveUpload(actor, desktopMetadata, "same-idempotency-key"),
+        ),
+      );
+      expect(new Set(results.map((r) => r.uploadId)).size).toBe(1);
+      expect(new Set(results.map((r) => r.nonce)).size).toBe(1);
+      expect((await sessionInfo(actor)).quota.account.remaining).toBe(9);
+    });
+    it("shares the final account slot across devices and rolls back losing global debit", async () => {
+      const owner = await loginCacheOwner();
+      const a = await desktopDevice(owner),
+        b = await desktopDevice(owner);
+      for (let i = 0; i < 9; i++) await createPendingUpload("browser", owner);
+      const results = await Promise.allSettled([
+        reserveUpload(a.actor, desktopMetadata, "last-slot-key-one"),
+        reserveUpload(b.actor, desktopMetadata, "last-slot-key-two"),
+      ]);
+      expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+      expect((await sessionInfo(a.actor)).quota).toMatchObject({
+        account: { remaining: 0 },
+        global: { remaining: 40 },
+      });
+    });
+    it("sorts opposite budget input order and rolls back later audit failures", async () => {
+      const a = { key: "order-a", limit: 10, windowMs: 60000 },
+        b = { key: "order-b", limit: 10, windowMs: 60000 };
+      expect(
+        await Promise.all([
+          consumeRequestBudgets([a, b]),
+          consumeRequestBudgets([b, a]),
+        ]),
+      ).toEqual([true, true]);
+      const { actor } = await desktopDevice(await loginCacheOwner());
+      await state.pool!.query(
+        "ALTER TABLE audit_logs ADD CONSTRAINT reject_desktop_reserved CHECK (action <> 'replay.reserved')",
+      );
+      try {
+        await expect(
+          reserveUpload(actor, desktopMetadata, "rollback-budget-key"),
+        ).rejects.toThrow();
+        expect((await sessionInfo(actor)).quota.account.remaining).toBe(10);
+        expect(await db.select().from(schema.desktopUploadJobs)).toHaveLength(
+          0,
+        );
+      } finally {
+        await state.pool!.query(
+          "ALTER TABLE audit_logs DROP CONSTRAINT reject_desktop_reserved",
+        );
+      }
+    });
+    async function claimed(
+      actor: Awaited<ReturnType<typeof credentialActor>>,
+      key: string,
+    ) {
+      const binding = await reserveUpload(actor, desktopMetadata, key),
+        claim = crypto.randomUUID();
+      await db
+        .update(schema.pendingUploads)
+        .set({ state: "processing" })
+        .where(eq(schema.pendingUploads.id, binding.uploadId));
+      await db
+        .update(schema.desktopUploadJobs)
+        .set({
+          state: "processing",
+          claimId: claim,
+          claimExpiresAt: new Date(Date.now() + 120000),
+        })
+        .where(eq(schema.desktopUploadJobs.id, binding.uploadId));
+      return {
+        binding,
+        hook: ingestionFinalizer(actor, binding.uploadId, binding.nonce, claim),
+      };
+    }
+    for (const failDuplicate of [false, true])
+      it(`finalizes unique-race duplicate atomically (reject duplicate=${failDuplicate})`, async () => {
+        const owner = await loginCacheOwner(),
+          a = await desktopDevice(owner),
+          b = await desktopDevice(owner);
+        const jobs = await Promise.all([
+          claimed(a.actor, "race-key-aaaaaaaa"),
+          claimed(b.actor, "race-key-bbbbbbbb"),
+        ]);
+        const barrier = await state.pool!.connect();
+        await barrier.query("SELECT pg_advisory_lock($1)", [BARRIER + 9]);
+        await state.pool!.query(
+          `CREATE FUNCTION pause_desktop_game() RETURNS trigger AS $$ BEGIN PERFORM pg_advisory_xact_lock_shared(${BARRIER + 9}); RETURN NEW; END; $$ LANGUAGE plpgsql; CREATE TRIGGER pause_desktop_game BEFORE INSERT ON games FOR EACH ROW EXECUTE FUNCTION pause_desktop_game()`,
+        );
+        const operations = jobs.map((j, i) =>
+          ingestReplay({
+            bytes: desktopBytes,
+            blobUrl: "https://fixture.invalid/" + j.binding.uploadId,
+            originalFilename: desktopMetadata.filename,
+            lastModified: desktopMetadata.lastModified,
+            actor: i === 0 ? a.actor : b.actor,
+            desktop: {
+              lock: j.hook.lock,
+              finalize: async (tx, result, hash) => {
+                await j.hook.finalize(tx, result, hash);
+                if (failDuplicate && result.duplicate)
+                  throw new Error("duplicate-finalizer-test");
+              },
+            },
+          }),
+        );
+        const settled = Promise.allSettled(operations);
+        try {
+          let waiting = false;
+          for (let i = 0; i < 150; i++) {
+            const r = await state.pool!.query(
+              "SELECT count(*)::int AS n FROM pg_stat_activity WHERE application_name='llvy-auth-regression' AND wait_event='advisory'",
+            );
+            if (r.rows[0].n >= 2) {
+              waiting = true;
+              break;
+            }
+            await delay(10);
+          }
+          expect(waiting).toBe(true);
+        } finally {
+          await barrier.query("SELECT pg_advisory_unlock($1)", [BARRIER + 9]);
+          barrier.release();
+        }
+        const outcomes = await settled;
+        await state.pool!.query(
+          "DROP TRIGGER pause_desktop_game ON games; DROP FUNCTION pause_desktop_game()",
+        );
+        expect(outcomes.filter((r) => r.status === "fulfilled")).toHaveLength(
+          failDuplicate ? 1 : 2,
+        );
+        expect(await db.select().from(schema.games)).toHaveLength(1);
+        expect(await db.select().from(schema.gameParticipants)).toHaveLength(
+          10,
+        );
+        const states = (await db.select().from(schema.desktopUploadJobs))
+          .map((j) => j.state)
+          .sort();
+        expect(states).toEqual(
+          failDuplicate
+            ? ["completed", "processing"]
+            : ["completed", "duplicate"],
+        );
+      });
+    it("holds device authority through final commit while revocation waits", async () => {
+      const owner = await loginCacheOwner(),
+        { actor } = await desktopDevice(owner),
+        job = await claimed(actor, "commit-revoke-key");
+      let entered!: () => void, release!: () => void;
+      const entry = new Promise<void>((r) => {
+          entered = r;
+        }),
+        gate = new Promise<void>((r) => {
+          release = r;
+        });
+      const writing = ingestReplay({
+        bytes: desktopBytes,
+        blobUrl: "https://fixture.invalid/locked",
+        originalFilename: desktopMetadata.filename,
+        lastModified: desktopMetadata.lastModified,
+        actor,
+        desktop: {
+          lock: job.hook.lock,
+          finalize: async (tx, result, hash) => {
+            await job.hook.finalize(tx, result, hash);
+            entered();
+            await gate;
+          },
+        },
+      });
+      await entry;
+      const revoking = revokeOwnDevice(owner, actor.deviceSessionId);
+      try {
+        await waitForLock(false);
+      } finally {
+        release();
+      }
+      await writing;
+      await revoking;
+      expect((await db.select().from(schema.desktopUploadJobs))[0].state).toBe(
+        "completed",
+      );
+      expect(await db.select().from(schema.games)).toHaveLength(1);
+      await expect(uploadStatus(actor, job.binding.uploadId)).rejects.toThrow();
+    });
 
     it("keeps legacy conflict resolution atomic against concurrent PUUID promotion", async () => {
       const actor = await loginCacheOwner();

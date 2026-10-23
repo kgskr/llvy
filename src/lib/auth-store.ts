@@ -1,9 +1,11 @@
 import "server-only";
+import { revokeDevicesInTx } from "@/lib/desktop/revoke";
 import { createHash } from "node:crypto";
 import { and, asc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import { db } from "@/db";
 import {
   adminGrants,
+  uploaderGrants,
   authAccounts,
   authMembershipDecisions,
   authSessions,
@@ -119,8 +121,27 @@ export async function applyMembership(
           isNull(adminGrants.revokedAt),
         ),
       );
+    const retiredUploaders = await tx
+      .update(uploaderGrants)
+      .set({ revokedAt: now, revokedBy: actor.accountId ?? null })
+      .where(
+        and(
+          eq(uploaderGrants.accountId, account.id),
+          isNull(uploaderGrants.revokedAt),
+        ),
+      )
+      .returning({ id: uploaderGrants.id });
+    for (const grant of retiredUploaders)
+      await appendAudit(tx, actor, {
+        action: "uploader.revoked",
+        targetType: "login_account",
+        targetId: account.id,
+        before: { uploader: true, uploaderGrantId: grant.id },
+        after: { uploader: false, reason: check.status },
+      });
     // Owners have no grant ID to rotate. Retire their old reservations too,
     // so a fresh login after rejoining cannot restore upload authority.
+    await revokeDevicesInTx(tx, account.id, actor);
     await tx
       .update(pendingUploads)
       .set({ state: "failed" })
@@ -224,7 +245,20 @@ export async function completeDiscordLogin(
           isNull(adminGrants.revokedAt),
         ),
       );
-    const role = accountRole(user.id, grant?.id ?? null);
+    const [uploadGrant] = await tx
+      .select({ id: uploaderGrants.id })
+      .from(uploaderGrants)
+      .where(
+        and(
+          eq(uploaderGrants.accountId, account.id),
+          isNull(uploaderGrants.revokedAt),
+        ),
+      );
+    const role = accountRole(
+      user.id,
+      grant?.id ?? null,
+      uploadGrant?.id ?? null,
+    );
     const actor = {
       role,
       name: user.displayName,
@@ -232,6 +266,7 @@ export async function completeDiscordLogin(
       discordUserId: user.id,
       sessionId: session.id,
       adminGrantId: role === "admin" ? (grant?.id ?? null) : null,
+      uploaderGrantId: role === "uploader" ? (uploadGrant?.id ?? null) : null,
     };
     await appendAudit(tx, actor, {
       action: "auth.login",

@@ -1,3 +1,4 @@
+import { canManage, canUpload, ROLE_LABELS } from "@/lib/capabilities";
 import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -13,12 +14,8 @@ export default async function AppLayout({
 }) {
   const session = await getReadSession();
   if (!session) redirect("/login");
-  const isAdmin = session.role !== "viewer";
-  const roleLabel = {
-    viewer: "일반 사용자",
-    admin: "관리자",
-    owner: "서비스 오너",
-  }[session.role];
+  const isAdmin = canManage(session.role);
+  const roleLabel = ROLE_LABELS[session.role];
   return (
     <div className="app-shell">
       <header className="nav">
@@ -40,13 +37,13 @@ export default async function AppLayout({
         <div className="nav-toolbar">
           <span className="nav-wordmark">LLVY</span>
           <nav className="nav-links" aria-label="주 메뉴">
-            {isAdmin ? <Link href="/upload">업로드</Link> : null}
+            {canUpload(session.role) ? (
+              <Link href="/upload">업로드</Link>
+            ) : null}
             <Link href="/games">게임</Link>
             <Link href="/members">모임원</Link>
             {isAdmin ? <Link href="/admin">관리</Link> : null}
-            {session.role === "owner" ? (
-              <Link href="/admin/users">사용자 권한</Link>
-            ) : null}
+            {isAdmin ? <Link href="/admin/users">사용자 권한</Link> : null}
           </nav>
           <form action={logout} className="nav-account">
             <span className="nav-role">{roleLabel}</span>

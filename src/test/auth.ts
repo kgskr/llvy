@@ -7,7 +7,12 @@ import {
 import { createHash, randomInt } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { vi } from "vitest";
-import { adminGrants, authAccounts, authSessions } from "@/db/schema";
+import {
+  adminGrants,
+  uploaderGrants,
+  authAccounts,
+  authSessions,
+} from "@/db/schema";
 import { db } from "@/test/database";
 import { ownerActor, ownerSession } from "@/test/actor";
 
@@ -81,17 +86,20 @@ export async function createTestSession(
     .from(authAccounts)
     .where(eq(authAccounts.discordUserId, userId));
   let adminGrantId: string | null = null;
-  if (role === "admin") {
+  let uploaderGrantId: string | null = null;
+  if (role === "admin" || role === "uploader") {
     const [issuer] = await db
       .select({ id: authAccounts.id })
       .from(authAccounts)
       .where(eq(authAccounts.discordUserId, config.ownerUserId));
     if (!issuer) throw new Error("Owner fixture is required");
+    const table = role === "uploader" ? uploaderGrants : adminGrants;
     const [grant] = await db
-      .insert(adminGrants)
+      .insert(table)
       .values({ accountId: account.id, issuedBy: issuer.id })
-      .returning({ id: adminGrants.id });
-    adminGrantId = grant.id;
+      .returning({ id: table.id });
+    if (role === "uploader") uploaderGrantId = grant.id;
+    else adminGrantId = grant.id;
   }
   const reference = randomReference();
   const issuedAt = Date.now();
@@ -112,6 +120,7 @@ export async function createTestSession(
     discordUserId: userId,
     sessionId: session.id,
     adminGrantId,
+    uploaderGrantId,
     name,
     token,
     issuedAt,

@@ -1,3 +1,4 @@
+import { canUpload } from "@/lib/capabilities";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { NextResponse } from "next/server";
 
@@ -46,7 +47,7 @@ export async function POST(request: Request): Promise<NextResponse> {
   if (!session) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (session.role === "viewer")
+  if (!canUpload(session.role))
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
 
   let body: HandleUploadBody;

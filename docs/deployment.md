@@ -105,7 +105,7 @@ npm run db:migrate
 1. 지정한 Discord 서버의 멤버 계정으로 로그인합니다. 가입 심사가 있다면 완료한 계정을 사용하세요.
 2. `DISCORD_OWNER_USER_ID`로 지정한 계정에서 **관리 → 사용자 권한**이 보이는지 확인합니다.
    다른 관리자가 필요하면 해당 사용자가 한 번 로그인한 뒤 지정합니다.
-3. 오너 또는 관리자 계정으로 `.rofl` 파일을 업로드하고 경기 목록·상세에 표시되는지 확인합니다.
+3. 업로더·관리자·오너 계정으로 `.rofl` 파일을 업로드하고 경기 목록·상세에 표시되는지 확인합니다.
 4. **관리**에서 모임원을 만들고 Riot 계정을 연결한 뒤, 검색과 모임원 전적을 확인합니다.
 5. Vercel의 **Settings → Cron Jobs**에서 아래 예약 작업이 등록되어 있는지 확인합니다.
 
@@ -137,3 +137,22 @@ npm run db:migrate
 Production 배포에서 실행되며, Vercel이 `CRON_SECRET`을 인증 헤더에 자동으로 담아 보냅니다.
 설정 방법은 [Vercel Cron 안내](https://vercel.com/docs/cron-jobs/manage-cron-jobs#securing-cron-jobs)를
 참고하세요. 첫 실행 후 Cron 로그에서 처리 결과를 확인합니다.
+
+## 데스크톱 업로더 활성화
+
+`DESKTOP_UPLOADER_ENABLED`는 미지정/false가 기본이다. true일 때만 새 기기 발급·갱신·업로드를 허용한다. 기존 웹 업로드와 기기 해제·maintenance는 별개다. schema-first 적용과 실제 연동 검사 후 활성화한다. [배포 순서 및 owner 변경 회수 절차](desktop-uploader.md#배포-순서와-운영-회수)를 따른다.
+
+전체 기기의 영구 회수에는 [운영 CLI](desktop-uploader.md#전체-기기-회수-명령)를 사용한다. 기본 `npm run desktop:revoke-all`은 무접속 계획 출력이다. 모든 serving version 차단과 발급 drain을 실제로 확인한 뒤에만 명시적 대상 DB와 `--apply`로 실행한다. `.env*`는 자동으로 로드하지 않는다.
+
+## 업로더 역할 적용
+
+2026-10-23 운영 DB에 `0008`~`0010` migration을 적용했다. 백업·검증 범위와 코드 배포 상태는 [운영 검증 기록](validation/2026-10-23-uploader-deployment.md)을 따른다.
+
+`0010_uploader_role.sql`은 `0009_desktop_uploader.sql` 다음에 적용하는 additive migration이다. `npm run db:migrate`로 journal에 따라 한 번 적용하며 SQL 파일을 수동 반복 실행하지 않는다. 기존 계정·admin grant·세션·감사 행의 역할을 변경하지 않고 nullable uploader snapshot, 예약 감사 복구용 `audit_metadata`와 새 grant table을 추가한다. 새 코드가 이 스키마를 읽으므로 schema-first 순서를 지킨다.
+
+1. 호환 계약 원본 commit과 앱 사본/hash 및 검사를 확정한다. 현재 계약은 로컬 `fe32e8a93a426b0446338d24c201c5b778dab682`로 고정했으며 원격 공개와 호환 배포는 남아 있다.
+2. 기존 코드 상태에서 DB backup·migration 적용을 검증한다. 새 스키마를 남겨도 기존 admin/owner 행의 의미는 유지된다.
+3. 모든 serving 서버를 새 코드로 전환하고 구버전 요청을 drain한다. viewer 생년 projection cache 버전도 새 namespace를 사용한다.
+4. 호환 Windows 앱과 네 역할의 웹·Discord·Blob 동작을 확인한 뒤 업로더 grant를 부여한다. desktop 기본 false 정책은 유지한다.
+
+구코드 rollback 전에 업로더 grant를 새 서비스로 회수하고 웹/desktop 세션·미완료 승인을 무효화한다. 모든 serving version에서 새 업로드를 차단하고 진행 중 처리를 drain한 뒤 돌아간다. 이미 발급한 Blob PUT 권한은 만료 전까지 바이트 전송이 가능할 수 있으나 새 승인·최종 DB 저장은 회수된 권한으로 허용되지 않는다. 새 컬럼·grant·감사는 삭제하거나 admin grant로 변환하지 않는다. 기존 생년 포함 캐시를 구코드가 읽지 않는지도 확인한다. 실제 운영 rollback 수행은 [검증 기록](validation/2026-10-19-uploader-role.md)의 미완료 항목이다.

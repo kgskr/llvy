@@ -350,6 +350,73 @@ describe("parseRofl - field handling", () => {
 });
 
 describe("parseRofl - resource budgets (Codex finding #3)", () => {
+  for (const [format, build] of [
+    ["legacy", buildLegacy],
+    ["rofl2", buildRofl2],
+  ] as const) {
+    for (const field of ["gameVersion", "SKIN"]) {
+      it(`${format} bounds normalized ${field} independently of diagnostics`, () => {
+        const makeReplay = (value: string) =>
+          build(
+            metadata(
+              [player(field === "SKIN" ? { SKIN: value } : {})],
+              field === "gameVersion" ? { gameVersion: value } : {},
+            ),
+          );
+        for (const boundary of ["a".repeat(256), "가".repeat(85) + "a"]) {
+          const parsed = parseRofl(makeReplay(` ${boundary} `));
+          expect(
+            field === "gameVersion"
+              ? parsed.gameVersion
+              : parsed.participants[0].champion,
+          ).toBe(boundary);
+          expect(() => parseRofl(makeReplay(boundary + "a"))).toThrow(
+            /256-byte storage limit/,
+          );
+        }
+        expect(() =>
+          parseRofl(
+            makeReplay(
+              "x".repeat(field === "gameVersion" ? 1024 * 1024 : 6000),
+            ),
+          ),
+        ).toThrow(/256-byte storage limit/);
+      });
+    }
+    for (const field of ["PUUID", "RIOT_ID_GAME_NAME", "RIOT_ID_TAG_LINE"]) {
+      it(`${format} bounds ${field} by UTF-8 bytes without truncating`, () => {
+        for (const boundary of ["a".repeat(512), "가".repeat(170) + "ab"]) {
+          const parsed = parseRofl(
+            build(metadata([player({ [field]: ` ${boundary} ` })])),
+          ).participants[0];
+          const actual =
+            field === "PUUID"
+              ? parsed.puuid
+              : field === "RIOT_ID_GAME_NAME"
+                ? parsed.riotGameName
+                : parsed.riotTagLine;
+          expect(actual).toBe(boundary);
+          expect(() =>
+            parseRofl(build(metadata([player({ [field]: boundary + "a" })]))),
+          ).toThrow(RoflParseError);
+        }
+        // This remains below participant JSON and file size limits.
+        expect(() =>
+          parseRofl(build(metadata([player({ [field]: "x".repeat(6000) })]))),
+        ).toThrow(/identity exceeds/);
+      });
+    }
+    it(`${format} preserves missing PUUID and empty legacy tag line`, () => {
+      const parsed = parseRofl(
+        build(metadata([player({ PUUID: undefined, RIOT_ID_TAG_LINE: " " })])),
+      );
+      expect(parsed.participants[0]).toMatchObject({
+        puuid: null,
+        riotTagLine: "",
+      });
+    });
+  }
+
   it("accepts exactly the supported maximum of 10 participants", () => {
     // Documents the boundary: normal 5v5 customs are the supported MVP shape,
     // and the happy-path suite above relies on this staying green.

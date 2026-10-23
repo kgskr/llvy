@@ -21,7 +21,13 @@
  * `REPLAY_INGEST_LIMITS`.
  */
 
-import { REPLAY_INGEST_LIMITS, type ReplayIngestLimits } from "../limits";
+import {
+  MAX_REPLAY_CHAMPION_BYTES,
+  MAX_REPLAY_GAME_VERSION_BYTES,
+  MAX_REPLAY_IDENTITY_BYTES,
+  REPLAY_INGEST_LIMITS,
+  type ReplayIngestLimits,
+} from "../limits";
 import { isStorageText } from "../storage-text";
 
 function checkedText(value: string): string {
@@ -294,6 +300,21 @@ function utf8ByteLength(text: string): number {
   return new TextEncoder().encode(text).length;
 }
 
+/** Check the exact value persisted in a normalized text column. */
+export function assertReplayTextBudget(
+  value: string | null,
+  field: string,
+  maxBytes: number,
+): void {
+  if (value === null) return;
+  if (value.length > maxBytes || utf8ByteLength(value) > maxBytes) {
+    throw new RoflParseError(
+      `Unsupported replay: ${field} exceeds the ${maxBytes}-byte storage limit.`,
+    );
+  }
+  checkedText(value);
+}
+
 /** True when `value` contains an object/array nested deeper than `remaining`
  * levels (the value itself counts as one level when it is an object). Bails on
  * the first offender, and recursion depth is capped by the budget itself. */
@@ -426,6 +447,26 @@ function boundToAllowlist(
   return out;
 }
 
+/** Bound the actual indexed columns, not only their diagnostic raw copies. */
+export function assertReplayIdentityBudget(
+  participant: Pick<
+    ParsedParticipant,
+    "riotGameName" | "riotTagLine" | "puuid"
+  >,
+): void {
+  for (const value of [
+    participant.riotGameName,
+    participant.riotTagLine,
+    participant.puuid,
+  ]) {
+    if (value !== null && utf8ByteLength(value) > MAX_REPLAY_IDENTITY_BYTES) {
+      throw new RoflParseError(
+        `Unsupported replay: participant identity exceeds the ${MAX_REPLAY_IDENTITY_BYTES}-byte storage limit.`,
+      );
+    }
+  }
+}
+
 function toParticipant(
   raw: Record<string, unknown>,
   limits: ReplayIngestLimits,
@@ -437,16 +478,21 @@ function toParticipant(
     );
   }
   const champion = nonEmpty(raw.SKIN);
+  assertReplayTextBudget(champion, "champion", MAX_REPLAY_CHAMPION_BYTES);
   const team = parseTeam(raw.TEAM);
   if (!champion || team === null) {
     throw new RoflParseError(
       "Unsupported replay: participant is missing a valid champion or team.",
     );
   }
-  return {
+  const identity = {
     riotGameName,
     riotTagLine: asString(raw.RIOT_ID_TAG_LINE).trim(),
     puuid: nonEmpty(raw.PUUID),
+  };
+  assertReplayIdentityBudget(identity);
+  return {
+    ...identity,
     champion,
     team,
     position: parsePosition(raw.TEAM_POSITION, raw.INDIVIDUAL_POSITION),
@@ -490,17 +536,23 @@ export function parseRofl(
   }
   const stats = parseStats(metadata, limits);
   const participants = stats.map((entry) => toParticipant(entry, limits));
+  const gameVersion =
+    nonEmpty(metadata.gameVersion) ??
+    (format === "rofl2"
+      ? extractRofl2GameVersion(
+          bytes,
+          metadataBytes.byteOffset - bytes.byteOffset,
+        )
+      : null);
+  assertReplayTextBudget(
+    gameVersion,
+    "game version",
+    MAX_REPLAY_GAME_VERSION_BYTES,
+  );
 
   return {
     durationMs,
-    gameVersion:
-      nonEmpty(metadata.gameVersion) ??
-      (format === "rofl2"
-        ? extractRofl2GameVersion(
-            bytes,
-            metadataBytes.byteOffset - bytes.byteOffset,
-          )
-        : null),
+    gameVersion,
     winningTeam: deriveWinningTeam(participants),
     participants,
     rawMetadata: boundToAllowlist(

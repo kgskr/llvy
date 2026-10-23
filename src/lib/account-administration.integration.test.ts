@@ -46,6 +46,7 @@ import {
   AccountIneligibleError,
   GrantConflictError,
   grantAdministrator,
+  grantUploader,
   listLoginAccounts,
   revokeAdministrator,
 } from "./account-administration";
@@ -104,6 +105,68 @@ async function brokenAudit(work: () => Promise<void>) {
   }
 }
 describe("independent account grants and current authority", () => {
+  it.each(["absent", "pending"] as const)(
+    "rejects protected uploader targets before %s membership can retire their authority",
+    async (status) => {
+      const admin = await createTestSession("admin");
+      const other = await createTestSession("admin");
+      mocks.token = admin.token;
+      mocks.fetch.mockImplementation(async (url: string) =>
+        status === "absent"
+          ? Response.json({ code: 10007 }, { status: 404 })
+          : Response.json({
+              user: { id: String(url).split("/").at(-1) },
+              pending: true,
+            }),
+      );
+      const before = await snapshot();
+      for (const target of [admin, other]) {
+        await expect(grantUploader(target.accountId)).rejects.toBeInstanceOf(
+          AccountIneligibleError,
+        );
+      }
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(await snapshot()).toEqual(before);
+    },
+  );
+  it("commits an eligible viewer's confirmed denial during an administrator uploader grant", async () => {
+    const admin = await createTestSession("admin");
+    const viewer = await createTestSession("viewer");
+    mocks.token = admin.token;
+    mocks.fetch.mockResolvedValueOnce(
+      Response.json({ code: 10007 }, { status: 404 }),
+    );
+    await expect(grantUploader(viewer.accountId)).rejects.toBeInstanceOf(
+      AccountIneligibleError,
+    );
+    expect(
+      (
+        await db
+          .select()
+          .from(authAccounts)
+          .where(eq(authAccounts.id, viewer.accountId))
+      )[0].status,
+    ).toBe("suspended");
+    expect(
+      (
+        await db
+          .select()
+          .from(authSessions)
+          .where(eq(authSessions.id, viewer.sessionId))
+      )[0].revokedAt,
+    ).not.toBeNull();
+    expect(await getSession()).toMatchObject({
+      accountId: admin.accountId,
+      role: "admin",
+    });
+    expect(
+      (await db.select().from(auditLogs)).filter(
+        (row) => row.action === "auth.account_suspended",
+      ),
+    ).toMatchObject([
+      { actorAccountId: admin.accountId, targetId: viewer.accountId },
+    ]);
+  });
   it("does not mistake a locked operation actor for an unknown membership target", async () => {
     const actor = (await getSession())!;
     const before = await snapshot();
@@ -207,7 +270,7 @@ describe("independent account grants and current authority", () => {
       for (const operation of [
         () => grantAdministrator(randomUUID()),
         () => revokeAdministrator(randomUUID()),
-        () => listLoginAccounts(),
+        ...(role === "viewer" ? [() => listLoginAccounts()] : []),
         () => listAuditLogs(),
       ])
         await expect(operation()).rejects.toBeInstanceOf(ForbiddenError);

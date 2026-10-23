@@ -117,7 +117,7 @@ game_participants                                       -- 게임별 참가자 �
 
 핵심: 참가자는 `riot_account_id`만 참조하고, 모임원은 `riot_accounts.member_id`를 통해 해결한다. 따라서 미연결 계정을 나중에 모임원에 연결하면 **과거 게임 참가자가 자동으로 그 모임원으로 해석**된다(재수집 불필요). 이것이 "미등록 보류 후 수동 연결" 요구사항을 데이터 모델 수준에서 충족한다.
 
-**필수/부가 구분**: 사용자가 명시한 저장 필수 데이터 = 게임 진행 날짜(`games.played_at`), 팀별 참가자 라이엇 아이디(`riot_accounts` + `game_participants.team`), 챔피언(`champion`), 포지션(`position`). KDA·골드(`kills/deaths/assists/gold_earned`)는 동일 `statsJson`에서 무료로 얻어지는 **부가** 컬럼이라 함께 저장하되, `raw_stats`에는 크기가 제한된 스칼라 허용 목록만 보존한다. 임의 필드·중첩 JSON·긴 문자열은 원본 그대로 보존하지 않는다. `raw_metadata`도 알려진 최상위 스칼라 필드만 보존하며, 원본 파일은 Blob에 유지한다.
+**필수/부가 구분**: 저장 필수 데이터 = 게임 진행 날짜(`games.played_at`), 팀별 참가자 라이엇 아이디(`riot_accounts` + `game_participants.team`), 챔피언(`champion`), 포지션(`position`). KDA·골드(`kills/deaths/assists/gold_earned`)는 동일 `statsJson`에서 무료로 얻어지는 **부가** 컬럼이라 함께 저장하되, `raw_stats`에는 크기가 제한된 스칼라 허용 목록만 보존한다. 임의 필드·중첩 JSON·긴 문자열은 원본 그대로 보존하지 않는다. `raw_metadata`도 알려진 최상위 스칼라 필드만 보존하며, 원본 파일은 Blob에 유지한다.
 
 ### 5. 인입 시 계정 find-or-create + 자동 연결
 PUUID가 있으면 해당 PUUID를 우선 식별자로 사용하고 기존 계정의 표시 이름을 갱신한다. 새 PUUID와 같은 Riot ID의 계정이 하나뿐이며 그 계정에 PUUID와 모임원 연결이 모두 없을 때만 기존 행을 승격한다. 이미 모임원에 연결된 구버전 계정은 이름 일치만으로 승격하지 않으며 새 미연결 PUUID 계정을 만들고 관리 화면에서 명시적으로 연결한다. PUUID가 없는 리플레이는 같은 Riot ID의 후보가 하나일 때만 재사용하며, 후보가 여러 개면 별도의 미연결 구버전 계정을 사용한다. 이후 `game_participants`는 선택된 계정을 참조한다.

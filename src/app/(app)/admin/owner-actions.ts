@@ -32,7 +32,7 @@ async function runOwnerAction(
     return {
       status: "success",
       message: grant
-        ? "관리자로 지정했습니다."
+        ? "관리자로 지정했습니다. 업로더에서 승격된 사용자는 다시 로그인하고 기기를 연결하세요."
         : "관리자 지정을 취소했습니다. 기존 로그인은 사용할 수 없습니다.",
       administrator: grant,
     };

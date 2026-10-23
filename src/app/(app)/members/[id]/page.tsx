@@ -1,3 +1,4 @@
+import { canManage, canUpload } from "@/lib/capabilities";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
@@ -43,7 +44,7 @@ export default async function MemberHistoryPage({
     (page - 1) * PAGE_SIZE,
   );
   if (!history) notFound();
-  const isAdmin = role !== "viewer";
+  const isAdmin = canManage(role);
   const pageCount = Math.max(
     1,
     Math.ceil(history.stats.totalGames / PAGE_SIZE),
@@ -244,7 +245,7 @@ export default async function MemberHistoryPage({
         {games.length === 0 ? (
           <p className="empty-state">
             집계할 경기가 없습니다.
-            {isAdmin ? (
+            {canUpload(role) ? (
               <>
                 {" "}
                 <Link href="/upload">리플레이 업로드 →</Link>

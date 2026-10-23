@@ -62,6 +62,7 @@ describe("POST /api/uploads", () => {
       expect(createPendingUpload).toHaveBeenCalledExactlyOnceWith(
         "session-token",
         ownerSession,
+        "match.ROFL",
       );
     },
   );
@@ -89,6 +90,29 @@ describe("POST /api/uploads", () => {
 
     expect(response.status).toBe(401);
     expect(createPendingUpload).not.toHaveBeenCalled();
+  });
+
+  it("allows uploader reservations without promoting its role", async () => {
+    const uploader = {
+      ...ownerSession,
+      role: "uploader" as const,
+      adminGrantId: null,
+      uploaderGrantId: crypto.randomUUID(),
+    };
+    vi.mocked(getSession).mockResolvedValue(uploader);
+    vi.mocked(createPendingUpload).mockResolvedValue({
+      uploadId: "id",
+      nonce: "nonce",
+      pathname: "replays/id.rofl",
+    });
+    expect((await POST(request({ filename: "uploader.rofl" }))).status).toBe(
+      200,
+    );
+    expect(createPendingUpload).toHaveBeenCalledWith(
+      uploader.token,
+      uploader,
+      "uploader.rofl",
+    );
   });
 
   it("rejects viewer reservations before allocating storage", async () => {

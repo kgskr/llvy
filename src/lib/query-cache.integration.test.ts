@@ -1182,33 +1182,40 @@ describe.skipIf(!testUrl)(
       expect(await redis.get(`${prefix}:generation`)).not.toBe(previous);
     });
 
-    it("projects viewer data before caching while retaining live session checks", async () => {
-      const { member, game } = await seed();
-      await getMembersReadModel();
-      mocks.token = (await createTestSession("viewer")).token;
-      const read = await getMembersReadModel();
-      const history = await getMemberHistoryReadModel(member.id);
-      const detail = await getGameDetailReadModel(game.id);
-      expect(read.members[0].name).toBe(member.name);
-      expect(read.members[0]).not.toHaveProperty("birthYear");
-      expect(history.history?.member.name).toBe(member.name);
-      expect(history.history?.member).not.toHaveProperty("birthYear");
-      expect(detail.game?.participants[0].memberName).toBe(member.name);
-      expect(await getMembersReadModel()).toEqual(read);
-      for (const key of (await dataKeys()).filter((key) =>
-        key.includes(":viewer:"),
-      )) {
-        const stored = (await redis.get(key))!;
-        if (key.includes(":members:") || key.includes(":game-detail-v2:"))
-          expect(stored).toContain(member.name);
-        expect(stored).not.toContain("김**원");
-        expect(stored).not.toContain("birthYear");
-      }
-      mocks.token = undefined;
-      const get = vi.spyOn(redis, "get");
-      await expect(getMembersReadModel()).rejects.toThrow("redirect:/login");
-      expect(get).not.toHaveBeenCalled();
-    });
+    it.each(["viewer", "uploader", "admin", "owner"] as const)(
+      "includes birth years on warmed member reads for %s while retaining live session checks",
+      async (role) => {
+        const { member, game } = await seed();
+        await getMembersReadModel();
+        mocks.token = (await createTestSession(role)).token;
+        const read = await getMembersReadModel();
+        const history = await getMemberHistoryReadModel(member.id);
+        const detail = await getGameDetailReadModel(game.id);
+        expect(read.members[0].name).toBe(member.name);
+        expect(read.members[0]).toHaveProperty("birthYear", member.birthYear);
+        expect(history.history?.member.name).toBe(member.name);
+        expect(history.history?.member).toHaveProperty(
+          "birthYear",
+          member.birthYear,
+        );
+        expect(detail.game?.participants[0].memberName).toBe(member.name);
+        expect(await getMembersReadModel()).toEqual(read);
+        for (const key of (await dataKeys()).filter((key) =>
+          key.includes(`:${role}:`),
+        )) {
+          const stored = (await redis.get(key))!;
+          if (key.includes(":members:") || key.includes(":game-detail-v2:"))
+            expect(stored).toContain(member.name);
+          expect(stored).not.toContain("김**원");
+          if (key.includes(":members:") || key.includes(":member-identity:"))
+            expect(stored).toContain("birthYear");
+        }
+        mocks.token = undefined;
+        const get = vi.spyOn(redis, "get");
+        await expect(getMembersReadModel()).rejects.toThrow("redirect:/login");
+        expect(get).not.toHaveBeenCalled();
+      },
+    );
 
     it("ignores still-valid masked results from the previous cache namespace", async () => {
       const { member } = await seed();
@@ -1228,7 +1235,7 @@ describe.skipIf(!testUrl)(
         await redis.set(key, stored, "EX", 60);
         const read = await getMembersReadModel();
         expect(read.members[0].name).toBe(member.name);
-        expect(read.members[0]).not.toHaveProperty("birthYear");
+        expect(read.members[0]).toHaveProperty("birthYear", member.birthYear);
         expect(await getMembersReadModel()).toEqual(read);
         expect(await redis.get(key)).toBe(stored);
       } finally {

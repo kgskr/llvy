@@ -1,3 +1,4 @@
+import { canManage } from "@/lib/capabilities";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
@@ -43,7 +44,7 @@ export default async function GameDetailPage({
   const [{ id }, { page, view }] = await Promise.all([params, searchParams]);
   const { game, role } = await getGameDetailReadModel(id);
   if (!game) notFound();
-  const isAdmin = role !== "viewer";
+  const isAdmin = canManage(role);
   const returnToExcluded =
     view === "excluded" || (!view && Boolean(game.excludedAt));
   const backHref = `/games?${returnToExcluded ? "view=excluded&" : ""}page=${parsePageNumber(page)}`;

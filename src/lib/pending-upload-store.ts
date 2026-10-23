@@ -4,8 +4,8 @@ import { and, eq, gt } from "drizzle-orm";
 
 import { db } from "@/db";
 import type { Actor } from "@/lib/auth";
-import { appendAudit, withActorTransaction } from "@/lib/audit";
-import { pendingUploads, type PendingUpload } from "@/db/schema";
+import { appendAudit, auditFilename, withUploadTransaction } from "@/lib/audit";
+import { auditLogs, pendingUploads, type PendingUpload } from "@/db/schema";
 import { PENDING_UPLOAD_TTL_MS, UPLOAD_BUDGET } from "@/lib/limits";
 import { generateNonce, hashNonce, replayPathname } from "@/lib/pending-upload";
 import { budgetKey, consumeRequestBudgets } from "@/lib/request-budget";
@@ -22,6 +22,7 @@ export class UploadBudgetExceeded extends Error {}
 export async function createPendingUpload(
   _sessionToken: string,
   actor: Actor,
+  originalFilename?: string,
 ): Promise<CreatedPendingUpload> {
   const allowed = await consumeRequestBudgets([
     {
@@ -40,7 +41,7 @@ export async function createPendingUpload(
   const uploadId = crypto.randomUUID();
   const nonce = generateNonce();
   const pathname = replayPathname(uploadId);
-  await withActorTransaction(actor, async (tx) => {
+  await withUploadTransaction(actor, async (tx) => {
     await tx.insert(pendingUploads).values({
       id: uploadId,
       nonceHash: hashNonce(nonce),
@@ -49,7 +50,9 @@ export async function createPendingUpload(
       actorAccountId: actor.accountId,
       actorDiscordUserId: actor.discordUserId,
       actorAdminGrantId: actor.adminGrantId,
+      actorUploaderGrantId: actor.uploaderGrantId ?? null,
       actorName: actor.name,
+      auditMetadata: { originalFilename: auditFilename(originalFilename) },
       expiresAt: new Date(Date.now() + PENDING_UPLOAD_TTL_MS),
     });
     await appendAudit(tx, actor, {
@@ -57,6 +60,7 @@ export async function createPendingUpload(
       targetType: "upload",
       targetId: uploadId,
       requestId: uploadId,
+      after: { channel: "browser", originalFilename },
     });
   });
   return { uploadId, nonce, pathname };
@@ -70,7 +74,26 @@ export async function getPendingUpload(
     .from(pendingUploads)
     .where(eq(pendingUploads.id, uploadId))
     .limit(1);
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  if (!row.auditMetadata) {
+    const [reservation] = await db
+      .select({ after: auditLogs.after })
+      .from(auditLogs)
+      .where(
+        and(
+          eq(auditLogs.action, "replay.reserved"),
+          eq(auditLogs.requestId, uploadId),
+        ),
+      )
+      .limit(1);
+    const filename = (
+      reservation?.after as { originalFilename?: unknown } | null
+    )?.originalFilename;
+    if (typeof filename === "string")
+      row.auditMetadata = { originalFilename: auditFilename(filename) };
+  }
+  return row;
 }
 
 /**

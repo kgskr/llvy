@@ -3,6 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { SESSION_COOKIE, readSessionToken } from "@/lib/auth";
 
 export async function proxy(request: NextRequest) {
+  // Desktop handlers authenticate independently using scoped bearer credentials.
+  if (request.nextUrl.pathname.startsWith("/api/desktop/v1/"))
+    return NextResponse.next();
   const token = request.cookies.get(SESSION_COOKIE)?.value;
   const session = await readSessionToken(token);
   const { pathname, search } = request.nextUrl;

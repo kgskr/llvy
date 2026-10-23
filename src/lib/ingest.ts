@@ -9,12 +9,17 @@ import { and, eq, isNull, sql } from "drizzle-orm";
 
 import { db } from "@/db";
 import type { Actor } from "@/lib/auth";
-import { appendAudit, lockActor, type DbTransaction } from "@/lib/audit";
+import { lockUploadAuthority } from "@/lib/authority";
+import { appendAudit, type DbTransaction } from "@/lib/audit";
 import { gameParticipants, games, riotAccounts } from "@/db/schema";
-import { assertWithinIngestBudget } from "@/lib/ingest-budget";
-import { formatKoreaDateInput } from "@/lib/game-date";
-import { isStorageText } from "@/lib/storage-text";
 import {
+  assertGameVersionBudget,
+  assertWithinIngestBudget,
+} from "@/lib/ingest-budget";
+import { formatKoreaDateInput } from "@/lib/game-date";
+import { MAX_REPLAY_FILENAME_BYTES } from "@/lib/limits";
+import {
+  assertReplayTextBudget,
   parseRofl,
   RoflParseError,
   type ParsedParticipant,
@@ -70,15 +75,26 @@ export async function ingestReplay(input: {
   /** HTTP callers always supply a verified actor; omitted only by internal fixture ingestion. */
   actor?: Actor;
   uploadId?: string;
+  desktop?: {
+    lock: (tx: DbTransaction) => Promise<void>;
+    finalize: (
+      tx: DbTransaction,
+      result: IngestResult,
+      serverSha256: string,
+    ) => Promise<void>;
+  };
 }): Promise<IngestResult> {
-  if (
-    input.originalFilename !== null &&
-    !isStorageText(input.originalFilename)
-  ) {
-    throw new RoflParseError(
-      "Unsupported replay: filename contains invalid Unicode.",
-    );
-  }
+  assertReplayTextBudget(
+    input.originalFilename,
+    "filename",
+    MAX_REPLAY_FILENAME_BYTES,
+  );
+  if (input.actor && "deviceSessionId" in input.actor && !input.desktop)
+    throw new Error("Desktop ingestion requires a transaction finalizer");
+  const authorize = async (tx: DbTransaction) => {
+    if (input.desktop) await input.desktop.lock(tx);
+    else if (input.actor) await lockUploadAuthority(tx, input.actor);
+  };
   const fileHash = sha256Hex(input.bytes);
 
   const existing = await db
@@ -89,13 +105,21 @@ export async function ingestReplay(input: {
   if (existing.length > 0) {
     if (input.actor)
       await db.transaction(async (tx) => {
-        await lockActor(tx, input.actor!);
-        await auditResult(
+        await authorize(tx);
+        if (!input.desktop)
+          await auditResult(
+            tx,
+            input.actor!,
+            input.uploadId,
+            existing[0].id,
+            true,
+            input.originalFilename,
+            fileHash,
+          );
+        await input.desktop?.finalize(
           tx,
-          input.actor!,
-          input.uploadId,
-          existing[0].id,
-          true,
+          { gameId: existing[0].id, duplicate: true },
+          fileHash,
         );
       });
     return { gameId: existing[0].id, duplicate: true };
@@ -107,6 +131,7 @@ export async function ingestReplay(input: {
   // (participant rows, account upserts, JSONB size) BEFORE opening the
   // transaction so an over-budget replay performs no writes at all.
   assertWithinIngestBudget(parsed.participants);
+  assertGameVersionBudget(parsed.gameVersion);
   const { playedAt, playedAtSource, nameObservedAt } = resolvePlayedAt(
     input.lastModified,
   );
@@ -120,7 +145,7 @@ export async function ingestReplay(input: {
 
   const result = await retryRolledBackTransaction(() =>
     db.transaction(async (tx) => {
-      if (input.actor) await lockActor(tx, input.actor);
+      await authorize(tx);
       const inserted = await tx
         .insert(games)
         .values({
@@ -147,8 +172,21 @@ export async function ingestReplay(input: {
           .from(games)
           .where(eq(games.fileHash, fileHash))
           .limit(1);
-        if (input.actor)
-          await auditResult(tx, input.actor, input.uploadId, row[0].id, true);
+        if (input.actor && !input.desktop)
+          await auditResult(
+            tx,
+            input.actor,
+            input.uploadId,
+            row[0].id,
+            true,
+            input.originalFilename,
+            fileHash,
+          );
+        await input.desktop?.finalize(
+          tx,
+          { gameId: row[0].id, duplicate: true },
+          fileHash,
+        );
         return { gameId: row[0].id, duplicate: true };
       }
 
@@ -193,10 +231,19 @@ export async function ingestReplay(input: {
       }
 
       await tx.insert(gameParticipants).values(participantRows);
-      if (input.actor)
-        await auditResult(tx, input.actor, input.uploadId, gameId, false);
+      if (input.actor && !input.desktop)
+        await auditResult(
+          tx,
+          input.actor,
+          input.uploadId,
+          gameId,
+          false,
+          input.originalFilename,
+          fileHash,
+        );
 
       await bumpCacheRevisions(tx, changes);
+      await input.desktop?.finalize(tx, { gameId, duplicate: false }, fileHash);
       return { gameId, duplicate: false };
     }),
   );
@@ -210,6 +257,8 @@ function auditResult(
   uploadId: string | undefined,
   gameId: string,
   duplicate: boolean,
+  originalFilename: string | null,
+  fileHash: string,
 ) {
   return appendAudit(tx, actor, {
     action: "replay.processed",
@@ -217,7 +266,7 @@ function auditResult(
     targetId: uploadId ?? gameId,
     requestId: uploadId,
     result: duplicate ? "duplicate" : "success",
-    after: { gameId },
+    after: { gameId, originalFilename, fileHash, channel: "browser" },
   });
 }
 

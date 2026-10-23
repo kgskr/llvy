@@ -1,4 +1,5 @@
 import "server-only";
+import { revokeDevicesInTx } from "@/lib/desktop/revoke";
 import {
   and,
   asc,
@@ -11,13 +12,18 @@ import {
   or,
 } from "drizzle-orm";
 import { db } from "@/db";
-import { adminGrants, authAccounts, authSessions } from "@/db/schema";
+import {
+  adminGrants,
+  uploaderGrants,
+  authAccounts,
+  authSessions,
+} from "@/db/schema";
 import { appendAudit, lockActor, type DbTransaction } from "@/lib/audit";
 import { accountRole } from "@/lib/authority";
-import { getAuthorityConfig } from "@/lib/auth";
-import { applyMembership, saveMembership } from "@/lib/auth-store";
+import { getAuthorityConfig, type Actor } from "@/lib/auth";
+import { applyMembership } from "@/lib/auth-store";
 import { lookupGuildMember } from "@/lib/discord";
-import { assertOwner, assertReadOwner } from "@/lib/session";
+import { assertAdmin, assertOwner, assertReadAdmin } from "@/lib/session";
 import { isUuid } from "@/lib/validation";
 
 export class AccountNotFoundError extends Error {}
@@ -32,7 +38,7 @@ async function lockAccounts(tx: DbTransaction, ids: string[]) {
     .for("update");
 }
 export async function listLoginAccounts(search = "", limit = 50, offset = 0) {
-  await assertReadOwner();
+  await assertReadAdmin();
   const text = search.slice(0, 64).replace(/[\\%_]/g, "\\$&");
   const filter = text
     ? or(
@@ -56,6 +62,7 @@ export async function listLoginAccounts(search = "", limit = 50, offset = 0) {
       membershipStatus: authAccounts.membershipStatus,
       membershipCheckedAt: authAccounts.membershipCheckedAt,
       grantId: adminGrants.id,
+      uploaderGrantId: uploaderGrants.id,
     })
     .from(authAccounts)
     .leftJoin(
@@ -63,6 +70,13 @@ export async function listLoginAccounts(search = "", limit = 50, offset = 0) {
       and(
         eq(adminGrants.accountId, authAccounts.id),
         isNull(adminGrants.revokedAt),
+      ),
+    )
+    .leftJoin(
+      uploaderGrants,
+      and(
+        eq(uploaderGrants.accountId, authAccounts.id),
+        isNull(uploaderGrants.revokedAt),
       ),
     )
     .where(filter)
@@ -75,13 +89,39 @@ export async function listLoginAccounts(search = "", limit = 50, offset = 0) {
       ...row,
       role:
         row.status === "active"
-          ? accountRole(row.discordUserId, row.grantId)
+          ? accountRole(row.discordUserId, row.grantId, row.uploaderGrantId)
           : null,
     })),
   };
 }
-export async function grantAdministrator(accountId: string): Promise<string> {
-  const actor = await assertOwner();
+type GrantKind = "admin" | "uploader";
+
+async function lockTargetSessions(tx: DbTransaction, accountId: string) {
+  await tx
+    .select({ id: authSessions.id })
+    .from(authSessions)
+    .where(eq(authSessions.accountId, accountId))
+    .orderBy(asc(authSessions.id))
+    .for("update");
+}
+async function invalidateTargetSessions(
+  tx: DbTransaction,
+  accountId: string,
+  actor: Actor,
+) {
+  await tx
+    .update(authSessions)
+    .set({ revokedAt: new Date() })
+    .where(
+      and(
+        eq(authSessions.accountId, accountId),
+        isNull(authSessions.revokedAt),
+      ),
+    );
+  await revokeDevicesInTx(tx, accountId, actor);
+}
+async function grantRole(accountId: string, kind: GrantKind): Promise<string> {
+  const actor = await (kind === "admin" ? assertOwner() : assertAdmin());
   if (!isUuid(accountId)) throw new AccountNotFoundError();
   const [target] = await db
     .select()
@@ -93,12 +133,20 @@ export async function grantAdministrator(accountId: string): Promise<string> {
     target.discordUserId === getAuthorityConfig().ownerUserId
   )
     throw new AccountIneligibleError();
-  const check = await lookupGuildMember(target.discordUserId);
-  if (check.status !== "member") {
-    await saveMembership(check, actor);
-    throw new AccountIneligibleError();
+  if (kind === "uploader") {
+    const [admin] = await db
+      .select({ id: adminGrants.id })
+      .from(adminGrants)
+      .where(
+        and(
+          eq(adminGrants.accountId, accountId),
+          isNull(adminGrants.revokedAt),
+        ),
+      );
+    if (admin) throw new AccountIneligibleError();
   }
-  return db.transaction(async (tx) => {
+  const check = await lookupGuildMember(target.discordUserId);
+  const result = await db.transaction(async (tx) => {
     const rows = await lockAccounts(tx, [actor.accountId, accountId]);
     await lockActor(tx, actor);
     const current = rows.find((row) => row.id === accountId);
@@ -108,9 +156,8 @@ export async function grantAdministrator(accountId: string): Promise<string> {
       current.discordUserId === getAuthorityConfig().ownerUserId
     )
       throw new AccountIneligibleError();
-    if (!(await applyMembership(tx, current, check, actor)))
-      throw new AccountIneligibleError();
-    const [existing] = await tx
+    await lockTargetSessions(tx, accountId);
+    const [admin] = await tx
       .select({ id: adminGrants.id })
       .from(adminGrants)
       .where(
@@ -119,22 +166,62 @@ export async function grantAdministrator(accountId: string): Promise<string> {
           isNull(adminGrants.revokedAt),
         ),
       );
-    if (existing) throw new GrantConflictError();
+    if (kind === "uploader" && admin) throw new AccountIneligibleError();
+    // Both provider outcomes revalidate issuer/target authority under the same
+    // account locks. Existing-account checks use the membership version guard.
+    if (!(await applyMembership(tx, current, check, actor)))
+      throw new AccountIneligibleError();
+    // Commit a confirmed denial for an eligible target before reporting failure.
+    if (check.status !== "member") return null;
+    const [uploader] = await tx
+      .select({ id: uploaderGrants.id })
+      .from(uploaderGrants)
+      .where(
+        and(
+          eq(uploaderGrants.accountId, accountId),
+          isNull(uploaderGrants.revokedAt),
+        ),
+      );
+    if (admin || (kind === "uploader" && uploader))
+      throw new GrantConflictError();
+    if (uploader) {
+      await tx
+        .update(uploaderGrants)
+        .set({ revokedAt: new Date(), revokedBy: actor.accountId })
+        .where(eq(uploaderGrants.id, uploader.id));
+      await invalidateTargetSessions(tx, accountId, actor);
+      await appendAudit(tx, actor, {
+        action: "uploader.revoked",
+        targetType: "login_account",
+        targetId: accountId,
+        before: { uploader: true, uploaderGrantId: uploader.id },
+        after: { uploader: false, reason: "promoted" },
+      });
+    }
+    const table = kind === "admin" ? adminGrants : uploaderGrants;
     const [grant] = await tx
-      .insert(adminGrants)
+      .insert(table)
       .values({ accountId, issuedBy: actor.accountId })
-      .returning({ id: adminGrants.id });
+      .returning({ id: table.id });
     await appendAudit(tx, actor, {
-      action: "admin.granted",
+      action: kind + ".granted",
       targetType: "login_account",
       targetId: accountId,
-      after: { administrator: true },
+      after:
+        kind === "admin"
+          ? { administrator: true, adminGrantId: grant.id }
+          : { uploader: true, uploaderGrantId: grant.id },
     });
     return grant.id;
   });
+  if (result === null) throw new AccountIneligibleError();
+  return result;
 }
-export async function revokeAdministrator(accountId: string): Promise<boolean> {
-  const actor = await assertOwner();
+async function revokeRole(
+  accountId: string,
+  kind: GrantKind,
+): Promise<boolean> {
+  const actor = await (kind === "admin" ? assertOwner() : assertAdmin());
   if (!isUuid(accountId)) throw new AccountNotFoundError();
   return db.transaction(async (tx) => {
     const rows = await lockAccounts(tx, [actor.accountId, accountId]);
@@ -143,41 +230,49 @@ export async function revokeAdministrator(accountId: string): Promise<boolean> {
     if (!target) throw new AccountNotFoundError();
     if (target.discordUserId === getAuthorityConfig().ownerUserId)
       throw new AccountIneligibleError();
-    const now = new Date();
-    // Keep lock order account → sessions → grant, shared with actor validation.
-    await tx
-      .select({ id: authSessions.id })
-      .from(authSessions)
-      .where(eq(authSessions.accountId, accountId))
-      .orderBy(asc(authSessions.id))
-      .for("update");
+    await lockTargetSessions(tx, accountId);
+    if (kind === "uploader") {
+      const [admin] = await tx
+        .select({ id: adminGrants.id })
+        .from(adminGrants)
+        .where(
+          and(
+            eq(adminGrants.accountId, accountId),
+            isNull(adminGrants.revokedAt),
+          ),
+        );
+      if (admin) throw new AccountIneligibleError();
+    }
+    const table = kind === "admin" ? adminGrants : uploaderGrants;
     const grants = await tx
-      .update(adminGrants)
-      .set({ revokedAt: now, revokedBy: actor.accountId })
-      .where(
-        and(
-          eq(adminGrants.accountId, accountId),
-          isNull(adminGrants.revokedAt),
-        ),
-      )
-      .returning({ id: adminGrants.id });
+      .update(table)
+      .set({ revokedAt: new Date(), revokedBy: actor.accountId })
+      .where(and(eq(table.accountId, accountId), isNull(table.revokedAt)))
+      .returning({ id: table.id });
     if (!grants.length) return false;
-    await tx
-      .update(authSessions)
-      .set({ revokedAt: now })
-      .where(
-        and(
-          eq(authSessions.accountId, accountId),
-          isNull(authSessions.revokedAt),
-        ),
-      );
+    await invalidateTargetSessions(tx, accountId, actor);
     await appendAudit(tx, actor, {
-      action: "admin.revoked",
+      action: kind + ".revoked",
       targetType: "login_account",
       targetId: accountId,
-      before: { administrator: true },
-      after: { administrator: false },
+      before:
+        kind === "admin"
+          ? { administrator: true, adminGrantId: grants[0].id }
+          : { uploader: true, uploaderGrantId: grants[0].id },
+      after: kind === "admin" ? { administrator: false } : { uploader: false },
     });
     return true;
   });
+}
+export async function grantAdministrator(accountId: string) {
+  return grantRole(accountId, "admin");
+}
+export async function revokeAdministrator(accountId: string) {
+  return revokeRole(accountId, "admin");
+}
+export async function grantUploader(accountId: string) {
+  return grantRole(accountId, "uploader");
+}
+export async function revokeUploader(accountId: string) {
+  return revokeRole(accountId, "uploader");
 }

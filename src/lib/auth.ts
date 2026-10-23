@@ -1,13 +1,14 @@
 /** Cookie verification is optimistic; DB authority is checked in the DAL. */
 export const SESSION_COOKIE = "llvy_session";
 export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
-export type SessionRole = "viewer" | "admin" | "owner";
+export type SessionRole = "viewer" | "uploader" | "admin" | "owner";
 export type Actor = {
   role: SessionRole;
   accountId: string;
   discordUserId: string;
   sessionId: string;
   adminGrantId: string | null;
+  uploaderGrantId?: string | null;
   name: string;
 };
 export type AuditActorSnapshot = {
@@ -16,6 +17,7 @@ export type AuditActorSnapshot = {
   accountId?: string | null;
   discordUserId?: string | null;
   adminGrantId?: string | null;
+  uploaderGrantId?: string | null;
   memberId?: string | null;
   credentialId?: string | null;
 };
@@ -155,10 +157,5 @@ export function isAdminPath(path: string) {
   return path === "/admin" || path.startsWith("/admin/");
 }
 export function isOwnerPath(path: string) {
-  return (
-    path === "/admin/audit" ||
-    path.startsWith("/admin/audit/") ||
-    path === "/admin/users" ||
-    path.startsWith("/admin/users/")
-  );
+  return path === "/admin/audit" || path.startsWith("/admin/audit/");
 }

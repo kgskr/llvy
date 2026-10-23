@@ -1,5 +1,15 @@
-import { REPLAY_INGEST_LIMITS, type ReplayIngestLimits } from "./limits";
-import { RoflParseError, type ParsedParticipant } from "./rofl/parser";
+import {
+  MAX_REPLAY_CHAMPION_BYTES,
+  MAX_REPLAY_GAME_VERSION_BYTES,
+  REPLAY_INGEST_LIMITS,
+  type ReplayIngestLimits,
+} from "./limits";
+import {
+  assertReplayIdentityBudget,
+  assertReplayTextBudget,
+  RoflParseError,
+  type ParsedParticipant,
+} from "./rofl/parser";
 
 /**
  * Re-validate parser output against DB work budgets immediately before the
@@ -20,6 +30,12 @@ export function assertWithinIngestBudget(
     );
   }
   for (const participant of participants) {
+    assertReplayIdentityBudget(participant);
+    assertReplayTextBudget(
+      participant.champion,
+      "champion",
+      MAX_REPLAY_CHAMPION_BYTES,
+    );
     // `raw` is the parser's bounded allowlist subset; enforce the storage
     // budget on exactly what would be written to JSONB.
     if (
@@ -31,4 +47,12 @@ export function assertWithinIngestBudget(
       );
     }
   }
+}
+
+export function assertGameVersionBudget(gameVersion: string | null): void {
+  assertReplayTextBudget(
+    gameVersion,
+    "game version",
+    MAX_REPLAY_GAME_VERSION_BYTES,
+  );
 }

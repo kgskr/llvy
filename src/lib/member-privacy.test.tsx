@@ -178,18 +178,18 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllEnvs());
 
 describe("privacy-safe member projection", () => {
-  it("omits the birthYear property and preserves raw records", () => {
+  it("includes birth years for authenticated roles and preserves raw records", () => {
     const projected = projectMember(MEMBER, "viewer");
-    expect(projected).not.toHaveProperty("birthYear");
+    expect(projected).toHaveProperty("birthYear", 1991);
     expect(projected.name).toBe(MEMBER.name);
     expect(MEMBER.name).toBe("가나다");
     expect(MEMBER.birthYear).toBe(1991);
-    for (const role of ["admin", "owner"] as const) {
+    for (const role of ["uploader", "admin", "owner"] as const) {
       expect(projectMember(MEMBER, role)).toEqual(MEMBER);
     }
   });
 
-  it("preserves original names and omits birth years from serialized viewer read models", async () => {
+  it("preserves original names and exposes birth years on viewer member read models", async () => {
     await signIn("viewer");
     const members = await getMembersReadModel();
     const history = await getMemberHistoryReadModel(MEMBER_ID);
@@ -198,14 +198,13 @@ describe("privacy-safe member projection", () => {
       const serialized = JSON.stringify(payload);
       expect(serialized).toContain(MEMBER.name);
       expect(serialized).not.toContain("가*다");
-      expect(serialized).not.toContain("birthYear");
-      expect(serialized).not.toContain("1991");
+
       expect(serialized).not.toContain(mocks.token);
       expect(serialized).toContain(ACCOUNT.gameName);
     }
     expect(history.history?.member).not.toHaveProperty("accounts");
-    expect(members.members[0]).not.toHaveProperty("birthYear");
-    expect(history.history?.member).not.toHaveProperty("birthYear");
+    expect(members.members[0]).toHaveProperty("birthYear", 1991);
+    expect(history.history?.member).toHaveProperty("birthYear", 1991);
   });
 
   it("projects each request independently across role changes", async () => {
@@ -213,7 +212,7 @@ describe("privacy-safe member projection", () => {
       await signIn(role);
       const { members } = await getMembersReadModel();
       expect(members[0].name).toBe(MEMBER.name);
-      expect("birthYear" in members[0]).toBe(role !== "viewer");
+      expect(members[0].birthYear).toBe(1991);
     }
     expect(mocks.listMembers).toHaveBeenCalledTimes(4);
   });
@@ -257,11 +256,11 @@ describe("read model authorization and page privacy", () => {
     expect(mocks.history).not.toHaveBeenCalled();
   });
 
-  it.each(["viewer", "admin", "owner"] as const)(
+  it.each(["viewer", "uploader", "admin", "owner"] as const)(
     "renders only permitted names, birth years, controls and navigation for %s",
     async (role) => {
       await signIn(role);
-      const privileged = role !== "viewer";
+      const privileged = role === "admin" || role === "owner";
       const members = renderToStaticMarkup(await MembersPage());
       const history = renderToStaticMarkup(
         await MemberHistoryPage({
@@ -286,13 +285,13 @@ describe("read model authorization and page privacy", () => {
         expect(html).not.toContain("가*다");
         expect(html).toContain(ACCOUNT.gameName);
       }
-      expect(members.includes("1991")).toBe(privileged);
+      expect(members).toContain("1991");
       expect(members).not.toContain("undefined");
       for (const html of [members, history, layout]) {
         expect(html.includes('href="/admin"')).toBe(privileged);
       }
       for (const html of [history, games, layout]) {
-        expect(html.includes('href="/upload"')).toBe(privileged);
+        expect(html.includes('href="/upload"')).toBe(role !== "viewer");
       }
       expect(game.includes('data-management="date"')).toBe(privileged);
       expect(game.includes('data-management="comment"')).toBe(privileged);
@@ -301,7 +300,7 @@ describe("read model authorization and page privacy", () => {
         /<a(?=[^>]*class="nav-brand")(?=[^>]*href="\/")[^>]*>/,
       );
       expect(layout).toContain('href="/members"');
-      expect(layout).not.toContain("업로더");
+      expect(layout.includes("업로더")).toBe(role === "uploader");
       expect(layout).not.toContain('href="/admin/audit"');
     },
   );
@@ -345,7 +344,7 @@ describe("read model authorization and page privacy", () => {
     await expect(UploadPage()).rejects.toThrow("redirect:/login");
     await signIn("viewer");
     await expect(UploadPage()).rejects.toThrow("redirect:/games");
-    for (const role of ["admin", "owner"] as const) {
+    for (const role of ["uploader", "admin", "owner"] as const) {
       await signIn(role);
       expect(renderToStaticMarkup(await UploadPage())).toContain("업로드 입력");
     }
@@ -354,7 +353,7 @@ describe("read model authorization and page privacy", () => {
     await expect(UploadPage()).rejects.toThrow("redirect:/login");
   });
 
-  it.each(["viewer", "admin", "owner"] as const)(
+  it.each(["viewer", "uploader", "admin", "owner"] as const)(
     "shows calendar dates and escaped whitespace-preserving shared comments to %s",
     async (role) => {
       await signIn(role);
@@ -384,12 +383,12 @@ describe("read model authorization and page privacy", () => {
       expect(detail).toContain("white-space:pre-wrap");
       expect(list).toContain('class="game-list-comment"');
       expect(detail.includes('data-management="comment"')).toBe(
-        role !== "viewer",
+        role === "admin" || role === "owner",
       );
     },
   );
 
-  it.each(["viewer", "admin", "owner"] as const)(
+  it.each(["viewer", "uploader", "admin", "owner"] as const)(
     "shows the search landing for %s without querying member or game records",
     async (role) => {
       await signIn(role);

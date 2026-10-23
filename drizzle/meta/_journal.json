@@ -64,6 +64,20 @@
       "when": 1792000044457,
       "tag": "0008_cache_revisions",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1792333073335,
+      "tag": "0009_desktop_uploader",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1792418810278,
+      "tag": "0010_uploader_role",
+      "breakpoints": true
     }
   ]
 }

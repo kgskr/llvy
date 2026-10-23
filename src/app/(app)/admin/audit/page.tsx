@@ -12,6 +12,8 @@ const ACTION_LABELS: Record<string, string> = {
   "auth.login": "로그인",
   "auth.logout": "로그아웃",
   "auth.account_suspended": "탈퇴 사용자 접근 정지",
+  "uploader.granted": "업로더 권한 부여",
+  "uploader.revoked": "업로더 권한 회수",
   "admin.granted": "관리자 지정",
   "admin.revoked": "관리자 지정 취소",
   "member.created": "모임원 등록",
@@ -29,6 +31,7 @@ const ACTION_LABELS: Record<string, string> = {
 };
 const ROLE_LABELS: Record<string, string> = {
   viewer: "일반 사용자",
+  uploader: "업로더",
   admin: "관리자",
   owner: "서비스 오너",
   system: "유지보수",
@@ -56,6 +59,13 @@ const CHANGE_LABELS: Record<string, string> = {
   gameId: "게임",
   reason: "사유",
   administrator: "관리자 여부",
+  uploader: "업로더 여부",
+  uploaderGrantId: "업로더 부여 ID",
+  adminGrantId: "관리자 부여 ID",
+  originalFilename: "파일명",
+  fileHash: "파일 SHA-256",
+  channel: "업로드 채널",
+  deviceSessionId: "기기 세션 ID",
   comment: "코멘트",
 };
 
@@ -125,8 +135,8 @@ export default async function AuditPage({
         </Link>
       </div>
       <p className="muted">
-        데이터 변경과 로그인 사건을 최근 순서로 표시합니다. 관리자 실행자는 그
-        비밀키를 발급받은 모임원입니다.
+        데이터 변경과 로그인, 업로드 이력을 최근 순서로 표시합니다. 실행자는
+        해당 작업을 수행한 로그인 계정입니다.
       </p>
       <section className="card stack" aria-label="감사 기록">
         {logs.length === 0 ? (
@@ -177,6 +187,12 @@ export default async function AuditPage({
                               <dd>{log.actorDiscordUserId}</dd>
                             </>
                           ) : null}
+                          {log.actorUploaderGrantId ? (
+                            <>
+                              <dt>업로더 부여 ID</dt>
+                              <dd>{log.actorUploaderGrantId}</dd>
+                            </>
+                          ) : null}
                           {log.actorAdminGrantId ? (
                             <>
                               <dt>관리자 부여 ID</dt>
@@ -217,6 +233,19 @@ export default async function AuditPage({
                     </td>
                     <td>
                       <Changes before={log.before} after={log.after} />
+                      {typeof changesRecord(log.after).gameId === "string" ? (
+                        log.gameExists ? (
+                          <Link
+                            href={`/games/${String(changesRecord(log.after).gameId)}`}
+                          >
+                            게임 보기
+                          </Link>
+                        ) : (
+                          <span className="muted">
+                            게임이 삭제되었거나 조회할 수 없습니다.
+                          </span>
+                        )
+                      ) : null}
                     </td>
                   </tr>
                 ))}

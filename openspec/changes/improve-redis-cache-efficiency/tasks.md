@@ -53,6 +53,8 @@
 
 ## 구현/운영 경계
 
+2026-10-23 갱신: backup과 별도 검증 브랜치의 강제 rollback 후 운영에 `0008`을 적용했다. 캐시 정책은 false로 유지한다. 아래의 migration 미실행 기록은 이전 구현 검증 시점이며, 현재 적용 근거는 [운영 검증 기록](../../../docs/validation/2026-10-23-uploader-deployment.md)을 따른다. 모든 active writer 확인과 활성화·성능·rollback 검증은 여전히 남아 있어 6.4~6.6 전체를 완료 처리하지 않는다.
+
 - 코드 구현과 로컬 검증은 `docs/validation/2026-10-15-redis-cache-efficiency.md`에 기록한다.
 - 5.3/5.4/6.2의 운영 사용률·최대 메모리·전체 HTTP p95는 미측정이다. 로컬 workload 결과만 기록하며 완료로 과장하지 않는다.
 - 6.4/6.5는 운영 전환 작업이다. 이전 writer가 남아 있는 것을 확인했으므로 활성화하지 않는다. 운영 DB migration과 인증 smoke를 실행한 것으로 표시하지 않는다.

@@ -5,7 +5,7 @@
 ## 개발 명령
 
 Node.js 24.x에서 `npm ci`로 의존성을 설치합니다.
-앱 실행에 필요한 환경변수는 [README](../README.md#실행)를 참고하세요.
+앱 실행에 필요한 환경변수는 [배포 안내](deployment.md)를 참고하세요.
 
 | 명령                         | 용도                                         |
 | ---------------------------- | -------------------------------------------- |
@@ -83,3 +83,11 @@ LLVY_REPLAY_FILE="/absolute/path/to/match.rofl" npm run test:replay
 
 - [내부 구조](architecture.md): 데이터 모델과 주요 처리 흐름
 - [OpenSpec](../openspec/README.md): 현재 요구사항과 변경 이력
+
+## 데스크톱 업로드 검사
+
+[데스크톱 서버 안내](desktop-uploader.md)를 참고한다. `VITEST_MAX_WORKERS=2 npm run check`로 기존 웹과 새 API를 검사한다. 실제 localhost PostgreSQL 경쟁 검사는 disposable `llvy_auth_test` DB를 `LLVY_POSTGRES_TEST_URL`로 지정한 뒤 `npm run test:auth-postgres`로 실행한다. 이 명령은 지정한 테스트 테이블을 비운다. Go/Windows 검사는 별도 앱 저장소에서 실행한다.
+
+운영 전체 기기 회수 명령은 `npm run desktop:revoke-all`이다. 기본 실행은 DB에 연결하지 않는 계획 출력이며 적용 조건과 대상 확인 방법은 [전체 기기 회수 명령](desktop-uploader.md#전체-기기-회수-명령)을 따른다. 테스트나 개발 초기화 용도로 실행하지 않는다.
+
+업로더 역할 검사는 `src/lib/uploader-role.integration.test.ts`에서 부여·회수·재부여·승격·탈퇴, 웹/desktop 파일 감사와 삭제 후 귀속 보존을 확인합니다. `test:auth-postgres`에는 동시 부여, admin/uploader 경쟁, 부여자 회수 중 provider 응답, 회수·승격·탈퇴와 최종 저장의 경합이 포함됩니다. 테스트에서 사용하는 Discord·Blob은 모의이며 실제 PostgreSQL 결과와도 별도로 구분합니다. [업로더 역할 검증](validation/2026-10-19-uploader-role.md)을 참고합니다.
