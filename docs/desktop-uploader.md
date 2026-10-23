@@ -1,6 +1,6 @@
 # Windows 업로더와 LLVY 서버
 
-상태: 2026-10-23 운영 DB에 `0008`~`0010` migration을 적용하고 호환 서버를 배포했다. desktop 기능은 기본 비활성화다. 서버 배포 결과와 남은 실제 Blob/Discord/Windows 검증은 [운영 검증 기록](validation/2026-10-23-uploader-deployment.md)을 따른다.
+상태: 2026-10-23 운영 DB에 `0008`~`0010` migration을 적용하고 호환 서버를 배포했다. 운영 환경은 `DESKTOP_UPLOADER_ENABLED=true`로 활성화했으며, 미설정 시 기본값은 false다. 서버 배포 결과와 남은 실제 Blob/Discord/Windows 검증은 [운영 검증 기록](validation/2026-10-23-uploader-deployment.md)을 따른다.
 
 ## 관리 경계
 
@@ -39,7 +39,7 @@ PUT 응답 유실 후 overwrite하지 않고 process로 존재를 확인한다. 
 1. DB 백업/복원 계획을 확인한 뒤 `0009_desktop_uploader.sql`과 `0010_uploader_role.sql`을 schema-first로 적용한다. 2026-10-23 백업과 별도 검증 브랜치의 강제 rollback 확인 후 운영에 적용했다.
 2. `DESKTOP_UPLOADER_ENABLED=false`로 호환 서버를 배포한다. 기존 웹 회귀와 maintenance를 확인한다.
 3. 별도 스테이징 Blob/Discord 및 실제 Windows에서 계약·헤더·권한 회수·한도·전체 업로드 흐름을 검증한다. Go 교차 빌드는 Windows 실행 증거가 아니다.
-4. 검증된 서버/계약/앱 revision을 기록한 뒤 flag 활성화와 앱 배포를 진행한다. 아직 활성화·릴리스하지 않았다.
+4. 서버/계약/앱 revision과 검증 범위를 기록하고 flag 활성화·앱 릴리스를 구분한다. 2026-10-23 서버의 운영 flag를 활성화했다. 실제 Windows·Discord·Blob 전체 수용 검증과 앱 릴리스 완료를 의미하지 않는다.
 
 장애 시 모든 접근 가능한 serving deployment에서 flag를 끄고 발급 중 요청이 끝날 때까지 drain한다. 단순 flag 변경은 기존 토큰의 영구 회수가 아니다. owner/secret 변경 및 rollback 전에는 동일한 차단을 적용한 뒤 `npm run desktop:revoke-all` 운영 명령을 아래 절차로 실행한다. 이 명령은 `src/lib/desktop/maintenance.ts`의 `revokeAllDesktopConnections()`를 재사용한다. 이 함수는 계정/기기 잠금 아래 모든 기기와 미완료 연결 요청을 영구 회수하고 브라우저 세션은 보존한다. 임의 HTTP 관리 endpoint는 제공하지 않는다.
 

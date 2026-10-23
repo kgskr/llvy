@@ -72,5 +72,7 @@
 
 ## 14. 한도 소진 재시도 안내 수정
 
+2026-10-23 운영 기록: schema-first 적용 이후 운영 `DESKTOP_UPLOADER_ENABLED=true`와 재배포를 완료했다. 인증 없는 session 거부와 잘못된 승인 요청의 입력 검증을 확인했다. [운영 검증 기록](../../../docs/validation/2026-10-23-uploader-deployment.md)을 따르며 실제 Windows·Discord·Blob 및 11.2의 staging rollback 검증은 완료 처리하지 않는다.
+
 - [x] 14.1 거부한 카운터의 실제 초기화 시각을 전달하고 남은 초 올림·최소 1초·근거 없는 헤더 생략을 구현한다.
 - [x] 14.2 계정/전체 한도와 부분 차감 rollback, 초기화 경계 회귀, 전체 check·strict·독립 리뷰를 수행하고 관련 안내를 갱신한다.
