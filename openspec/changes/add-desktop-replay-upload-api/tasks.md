@@ -82,3 +82,9 @@
 - [x] 15.1 OAuth callback과 실제 웹 origin을 분리해 same-origin·CSRF 검증을 수정한다.
 - [x] 15.2 www/루트·port·production HTTP·위조 origin/토큰·다른 session/action 회귀와 서버 check·strict를 검증한다.
 - [x] 15.3 문서와 검증 범위를 갱신하고 수정 commit을 운영에 배포한다. 실제 Windows 재연결 결과는 별도로 확인한다.
+
+## 16. 빌드된 승인 액션의 요청 ID 전달 수정
+
+- [x] 16.1 승인 액션을 모듈로 분리하고 request ID를 명시적으로 bind하여 CSRF와 저장 호출에 같은 값을 전달한다.
+- [x] 16.2 production 빌드 페이지·액션 실행 회귀와 전체 check·strict를 검증한다.
+- [ ] 16.3 운영 배포와 검증 범위를 기록하고 실제 Windows 재시도 결과는 별도로 확인한다.

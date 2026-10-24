@@ -192,3 +192,7 @@ reservation nonce는 DB에 hash만 남긴다. 응답 유실 복구를 위해 서
 ### 브라우저 접속 주소와 OAuth 콜백 주소 분리
 
 데스크톱 승인·기기 해제의 POST는 Origin의 정확한 scheme/host/port와 요청 Host를 검사한다. 운영은 HTTPS만 허용하며 개발 HTTP는 loopback에 한정한다. Origin 누락·null·다른 host/port·경로·사용자 정보가 포함된 값은 거부한다. X-Forwarded-Host를 별도 허용 출처로 사용하지 않는다. 세션 ID와 동작에 묶인 HMAC CSRF 토큰을 64자리 hex로 검증하고 timingSafeEqual로 비교한다. Next.js Server Actions의 기본 Origin 검증도 유지한다. Discord redirect URI는 OAuth 등록 callback에만 사용하며 웹의 www 별칭으로 접속한 정상 승인 요청을 거부하지 않는다.
+
+### 승인 요청 ID의 명시적 Server Action 인자
+
+승인 처리는 모듈 수준 Server Action으로 분리하고 페이지는 request ID를 bind 인자로 전달한다. 액션은 현재 세션을 다시 조회하고 같은 ID로 CSRF action과 승인 저장 호출을 구성한다. 페이지 지역 변수의 자동 closure 캡처에 의존하지 않는다. production 빌드 산출물의 실제 페이지와 액션 factory를 격리된 의존성으로 실행해 요청 ID가 최종 승인 호출까지 전달되는지 회귀 검사한다. 이 검사는 실제 DB·Discord·Windows 검증과 구분한다.

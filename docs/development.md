@@ -7,26 +7,29 @@
 Node.js 24.x에서 `npm ci`로 의존성을 설치합니다.
 앱 실행에 필요한 환경변수는 [배포 안내](deployment.md)를 참고하세요.
 
-| 명령                         | 용도                                         |
-| ---------------------------- | -------------------------------------------- |
-| `npm run dev`                | 개발 서버 실행                               |
-| `npm test`                   | 전체 테스트 실행                             |
-| `npm run test:watch`         | 파일 변경 시 테스트 재실행                   |
-| `npm run test:integration`   | 저장·업로드·경기 관리 DB 통합 테스트 실행    |
-| `npm run test:auth-postgres` | 실제 PostgreSQL의 인증 경합·검색 통합 테스트 |
-| `npm run test:redis`         | 실제 Redis의 캐시·자동완성 통합 테스트       |
-| `npm run lint`               | ESLint 검사                                  |
-| `npm run typecheck`          | TypeScript 타입 검사                         |
-| `npm run build`              | 배포용 빌드                                  |
-| `npm run format`             | 코드 포맷 검사                               |
-| `npm run format:write`       | 코드 포맷 적용                               |
-| `npm run check`              | 테스트 → 린트 → 타입 → 빌드 → 포맷 전체 검사 |
+| 명령                         | 용도                                                |
+| ---------------------------- | --------------------------------------------------- |
+| `npm run dev`                | 개발 서버 실행                                      |
+| `npm test`                   | 전체 테스트 실행                                    |
+| `npm run test:watch`         | 파일 변경 시 테스트 재실행                          |
+| `npm run test:integration`   | 저장·업로드·경기 관리 DB 통합 테스트 실행           |
+| `npm run test:auth-postgres` | 실제 PostgreSQL의 인증 경합·검색 통합 테스트        |
+| `npm run test:redis`         | 실제 Redis의 캐시·자동완성 통합 테스트              |
+| `npm run lint`               | ESLint 검사                                         |
+| `npm run typecheck`          | TypeScript 타입 검사                                |
+| `npm run build`              | 배포용 빌드                                         |
+| `npm run test:desktop-build` | production 빌드의 승인 폼·Server Action 실행 검사   |
+| `npm run format`             | 코드 포맷 검사                                      |
+| `npm run format:write`       | 코드 포맷 적용                                      |
+| `npm run check`              | 테스트 → 린트 → 타입 → 빌드 → 승인 액션 → 포맷 검사 |
 
 ## 테스트
 
 테스트는 Vitest를 사용하며 구현 파일 가까이에 `*.test.ts`로 둡니다.
 기본 DB 테스트는 메모리에서 실행되는 PGlite를 사용하고, Discord와 Blob 등 외부 연동은
 모의 처리합니다. 별도 서비스 자격증명 없이 `npm run check`를 실행할 수 있습니다.
+
+`test:desktop-build`는 `npm run build` 이후 생성된 승인 페이지와 Server Action을 실행해 요청 ID 전달, 승인·거절 리다이렉트, 세션·CSRF 거부 전 저장 차단을 확인합니다. Next.js 컴파일 과정의 closure 누락을 잡기 위해 실제 빌드 factory를 사용하되 인증·DB 의존성은 격리된 모의 구현입니다. 빌드 형식이 바뀌어 대상을 찾지 못하면 건너뛰지 않고 실패합니다. 실제 Windows·Discord·Blob 연동 검증을 대신하지 않습니다.
 
 `test:integration`은 일부 DB 테스트만 실행합니다. 전체 테스트는 `npm test`로 실행하세요.
 실제 PostgreSQL·Redis 연결이나 리플레이 파일이 필요한 테스트는 해당 설정이 없으면

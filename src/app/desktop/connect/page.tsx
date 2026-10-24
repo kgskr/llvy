@@ -2,13 +2,10 @@ import { canUpload, ROLE_LABELS } from "@/lib/capabilities";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getSession } from "@/lib/session";
-import {
-  approveAuthorization,
-  connectionRequest,
-  listOwnDevices,
-} from "@/lib/desktop/auth-store";
-import { checkCsrf, csrf } from "@/lib/desktop/browser";
+import { connectionRequest, listOwnDevices } from "@/lib/desktop/auth-store";
+import { csrf } from "@/lib/desktop/browser";
 import { DesktopError } from "@/lib/desktop/protocol";
+import { submitConnection } from "./actions";
 export const dynamic = "force-dynamic";
 export default async function Connect({
   searchParams,
@@ -46,23 +43,6 @@ export default async function Connect({
   }
   const devices = (await listOwnDevices(actor)).filter((d) => d.active);
   const action = "connect:" + id;
-  async function submit(form: FormData) {
-    "use server";
-    const current = await getSession();
-    if (!current) redirect("/login");
-    await checkCsrf(current, action, form.get("csrf"));
-    const decision = form.get("decision");
-    if (decision !== "approve" && decision !== "deny")
-      throw new DesktopError("invalid_request");
-    const replacement = form.get("replacement");
-    const callback = await approveAuthorization(
-      current,
-      id,
-      decision,
-      typeof replacement === "string" && replacement ? replacement : undefined,
-    );
-    redirect(callback ?? "/desktop/devices");
-  }
   return (
     <main className="container">
       <h1>LLVY 업로더 연결</h1>
@@ -79,7 +59,7 @@ export default async function Connect({
         본인이 앱에서 시작한 요청인지 확인해 주세요. 활성 연결: {devices.length}
         /5
       </p>
-      <form action={submit}>
+      <form action={submitConnection.bind(null, id)}>
         <input type="hidden" name="csrf" value={csrf(actor, action)} />
         <label>
           교체할 임시 연결

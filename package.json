@@ -21,7 +21,8 @@
     "test:redis": "node scripts/test-redis.mjs",
     "test:auth-postgres": "node scripts/test-auth-postgres.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm test && npm run lint && npm run typecheck && npm run build && npm run format",
+    "test:desktop-build": "node scripts/test-desktop-connect-build.mjs",
+    "check": "npm test && npm run lint && npm run typecheck && npm run build && npm run test:desktop-build && npm run format",
     "test:watch": "vitest",
     "desktop:revoke-all": "node scripts/revoke-desktop-connections.mjs"
   },

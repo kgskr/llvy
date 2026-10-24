@@ -168,3 +168,12 @@ Desktop approval and device revocation SHALL compare the browser Origin to the a
 
 - **WHEN** an origin is absent, malformed, has a different host or port, uses production HTTP, or the token belongs to another session or action
 - **THEN** approval and revocation are rejected before changing device authority
+
+### Requirement: Approval preserves request identity in production action compilation
+
+The approval page SHALL bind its request ID explicitly to a module-level Server Action. The action SHALL recheck the current browser session and use that same ID for CSRF validation and the authorization transition. Production-build verification SHALL execute the compiled form action and verify request identity propagation, approval/denial redirects, and rejection before mutation when session or CSRF validation fails.
+
+#### Scenario: Compiled approval form is submitted
+
+- **WHEN** a production-built form for a valid request is approved with a valid browser session and CSRF token
+- **THEN** the same request ID reaches the approval store and the browser redirects to the issued loopback callback without a missing closure variable error

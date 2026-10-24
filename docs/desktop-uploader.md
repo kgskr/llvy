@@ -70,3 +70,5 @@ npm run desktop:revoke-all -- --apply --database-target db.example.invalid/llvy 
 ## 브라우저 승인 주소 검사
 
 연결 승인과 기기 해제는 실제 요청의 Host와 브라우저 Origin의 scheme/host/port를 대조하고 세션·동작별 CSRF 토큰을 확인한다. 운영에서는 HTTPS만 허용한다. Discord에 등록한 callback origin은 이 검사의 기준이 아니므로 www 웹 주소와 루트 callback 주소가 다르더라도 동일 출처의 정상 제출을 허용한다. 다른 출처·port, 누락되거나 변형된 Origin, 다른 세션/동작의 CSRF 토큰은 거부한다. 기능 활성 플래그와 업로더 이상 권한 검사는 그대로 적용한다.
+
+승인 폼은 request ID를 모듈 수준 Server Action에 명시적으로 bind한다. 액션은 현재 세션을 다시 확인하고 같은 ID로 CSRF 검사와 승인 저장을 수행한다. `npm run check`에는 실제 production 빌드된 폼의 제출과 콜백 주소 반환을 확인하는 격리 검사를 포함한다.
