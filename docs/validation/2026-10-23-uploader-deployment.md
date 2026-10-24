@@ -48,3 +48,13 @@
 - www/루트 callback 구분, 다른 origin/port, 운영 HTTP, Origin 누락·변형, 다른 세션/동작과 잘못된 토큰 등 새 회귀 25개 통과.
 - OpenSpec strict 28개 및 diff 검사 통과. 운영 무인증 session 401과 빈 인증 요청 400을 재확인했다.
 - 실제 Windows 앱의 승인·콜백·토큰 교환 재시도 결과는 별도 확인 대상이다. 전체 Windows·Discord·Blob 수용 검증과 change 아카이브 조건은 계속 미완료다. 기존 오류 페이지를 재사용하지 말고 앱에서 새 연결 요청을 시작한다.
+
+## 2026-10-24 빌드된 승인 액션의 요청 ID 수정
+
+origin 검사 이후의 승인 POST에서 `ReferenceError: id is not defined`가 발생했다. production 산출물은 inline Server Action에 CSRF action 문자열만 캡처하고 승인 저장 호출의 `id`를 지역 범위 밖에 남겼다. 모듈 수준 Server Action으로 분리하고 페이지가 request ID를 명시적으로 bind하도록 수정했다. 현재 세션 재조회·같은 ID의 CSRF 검사·승인 저장·loopback 리다이렉트 순서는 유지한다.
+
+- 수정 commit: `f0f651577effb728cfcf6bb8124755108c6e38dd`.
+- 운영 배포: `dpl_HcEJcUf5CbDMHoV3JEs6mkPeQu1C`, `llvy-fcwismsb9-kimgs-projects.vercel.app`. READY와 운영 www·루트 도메인 할당을 확인했다.
+- 이전 production 빌드의 실제 페이지·액션 factory 실행에서 같은 ReferenceError를 재현했다. 수정 후 요청 ID 전달, 승인·거절의 목적지, 세션·CSRF·decision 거부 시 저장하지 않는 경로를 통과했다.
+- `npm run check`에 빌드 후 실행 회귀를 추가했다. Node 24 전체 검사에서 테스트 991개 통과·조건부 93개 건너뜀, lint·typecheck·build·빌드 액션 실행·format 통과. OpenSpec strict 28개 통과.
+- 빌드 실행 회귀의 인증·DB 의존성은 모의 구현이다. 실제 Windows 재연결·외부 업로드의 전체 수용 검증은 계속 별도이며 change는 열린 상태를 유지한다. exe·계약·DB 변경은 없다.
