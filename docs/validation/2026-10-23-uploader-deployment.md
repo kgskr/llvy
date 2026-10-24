@@ -58,3 +58,5 @@ origin 검사 이후의 승인 POST에서 `ReferenceError: id is not defined`가
 - 이전 production 빌드의 실제 페이지·액션 factory 실행에서 같은 ReferenceError를 재현했다. 수정 후 요청 ID 전달, 승인·거절의 목적지, 세션·CSRF·decision 거부 시 저장하지 않는 경로를 통과했다.
 - `npm run check`에 빌드 후 실행 회귀를 추가했다. Node 24 전체 검사에서 테스트 991개 통과·조건부 93개 건너뜀, lint·typecheck·build·빌드 액션 실행·format 통과. OpenSpec strict 28개 통과.
 - 빌드 실행 회귀의 인증·DB 의존성은 모의 구현이다. 실제 Windows 재연결·외부 업로드의 전체 수용 검증은 계속 별도이며 change는 열린 상태를 유지한다. exe·계약·DB 변경은 없다.
+
+같은 날 15:46 KST 운영 요청 로그에서 수정 배포의 승인 POST, 데스크톱 토큰 교환 POST, 후속 앱 session GET이 순서대로 모두 HTTP 200을 반환했다. 실제 앱의 승인 후 토큰 발급·인증 세션 조회 성공을 확인했다. 이 확인은 Blob 전송·리플레이 저장·회수 및 Windows 전체 UI 수용 검증 완료를 의미하지 않는다.
