@@ -154,3 +154,17 @@ The repository SHALL provide an executable operator command reusing the audited 
 
 - **WHEN** all explicit prerequisites are supplied after every serving deployment is disabled and drained
 - **THEN** the command executes the existing permanent device and unfinished authorization-request revocation transaction and reports only bounded non-secret counts
+
+### Requirement: Browser approvals validate the serving origin independently of OAuth callback
+
+Desktop approval and device revocation SHALL compare the browser Origin to the actual request Host including port, require HTTPS in production, and retain session/action-bound constant-time CSRF verification. HTTP SHALL be allowed only for development loopback hosts. The configured Discord callback origin SHALL NOT determine the origin allowed for these browser actions. Missing, malformed, cross-host or cross-port origins and invalid CSRF tokens SHALL fail closed; forwarded-host input SHALL NOT extend allowed origins.
+
+#### Scenario: Public www host differs from the registered Discord callback
+
+- **WHEN** an authenticated browser posts on the same HTTPS www host where the desktop form was served with the correct CSRF token, while the registered callback uses the apex domain
+- **THEN** the same-origin check passes without changing the Discord callback or requiring a new client executable
+
+#### Scenario: Cross-origin or forged approval
+
+- **WHEN** an origin is absent, malformed, has a different host or port, uses production HTTP, or the token belongs to another session or action
+- **THEN** approval and revocation are rejected before changing device authority

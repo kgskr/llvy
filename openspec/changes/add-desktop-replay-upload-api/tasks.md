@@ -76,3 +76,9 @@
 
 - [x] 14.1 거부한 카운터의 실제 초기화 시각을 전달하고 남은 초 올림·최소 1초·근거 없는 헤더 생략을 구현한다.
 - [x] 14.2 계정/전체 한도와 부분 차감 rollback, 초기화 경계 회귀, 전체 check·strict·독립 리뷰를 수행하고 관련 안내를 갱신한다.
+
+## 15. 승인 페이지 접속 주소 검증 수정
+
+- [x] 15.1 OAuth callback과 실제 웹 origin을 분리해 same-origin·CSRF 검증을 수정한다.
+- [x] 15.2 www/루트·port·production HTTP·위조 origin/토큰·다른 session/action 회귀와 서버 check·strict를 검증한다.
+- [ ] 15.3 문서와 검증 범위를 갱신하고 수정 commit을 운영에 배포한다. 실제 Windows 재연결 결과는 별도로 확인한다.

@@ -66,3 +66,7 @@ npm run desktop:revoke-all -- --apply --database-target db.example.invalid/llvy 
 서버 schema/fixture와 앱 파서를 수정하고 계약 `fe32e8a93a426b0446338d24c201c5b778dab682`를 `uploader-role-contract` ref로 원격에 공개했다. 앱 사본/hash가 일치하며 실제 앱 릴리스·실환경 검증은 남아 있다. [계약 배포 순서](../contracts/desktop-v1/README.md#업로더-역할-확장)와 [역할 적용/rollback](deployment.md#업로더-역할-적용)을 따른다.
 
 오너는 감사 화면에서 제출 계정, 당시 역할/grant, 파일명과 서버 SHA-256, 업로드 ID, 기기·채널, 결과·게임을 확인한다. 실패·만료는 서버가 확보한 정보만 기록한다. 예약 정리와 게임 삭제 후에도 귀속은 유지한다. 앱의 로컬 진단에는 파일명·계정 정보를 추가하지 않는다.
+
+## 브라우저 승인 주소 검사
+
+연결 승인과 기기 해제는 실제 요청의 Host와 브라우저 Origin의 scheme/host/port를 대조하고 세션·동작별 CSRF 토큰을 확인한다. 운영에서는 HTTPS만 허용한다. Discord에 등록한 callback origin은 이 검사의 기준이 아니므로 www 웹 주소와 루트 callback 주소가 다르더라도 동일 출처의 정상 제출을 허용한다. 다른 출처·port, 누락되거나 변형된 Origin, 다른 세션/동작의 CSRF 토큰은 거부한다. 기능 활성 플래그와 업로더 이상 권한 검사는 그대로 적용한다.

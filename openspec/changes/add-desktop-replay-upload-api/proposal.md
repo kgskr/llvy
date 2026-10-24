@@ -5,6 +5,7 @@ Windows 업로더가 기존 웹 업로드를 보존하면서 LLVY 권한으로 �
 ## What Changes
 
 - 기존 Discord 브라우저 승인과 PKCE를 이용한 제한된 기기 세션을 추가한다.
+- 승인·기기 해제의 동일 출처 검증은 OAuth 콜백 주소가 아닌 실제 요청 Host와 Origin을 대조하고 세션·동작별 CSRF 토큰을 함께 확인한다.
 - `/api/desktop/v1/`의 인증·예약·전송 승인·처리·조회와 기존 저장 계층 재사용을 구현한다.
 - 서버가 계약·fixture 원본을 소유하고 별도 업로더 저장소가 고정 버전을 소비한다.
 - 기존 웹 URL·쿠키·DTO·계정 한도와 권한 잠금을 유지한다. `DESKTOP_UPLOADER_ENABLED` 기본 false로 독립 활성화하며 Worker 연결은 요구하지 않는다.

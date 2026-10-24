@@ -188,3 +188,7 @@ reservation nonce는 DB에 hash만 남긴다. 응답 유실 복구를 위해 서
 ### 업로더 역할 변경과 합성
 
 `add-uploader-role`의 네 역할·생년 조회·grant 전환·파일 감사 delta를 합성한다. desktop 요청/세션에는 별도 uploaderGrantId를 보존한다. desktop 기본 change를 먼저 동기화하고 uploader delta를 최종 정책으로 적용한다. 순서가 바뀌어도 이 합성된 delta가 구권한으로 되돌리지 않아야 한다. 기존 desktop 실환경 수용 검증 체크 상태는 그대로 유지한다.
+
+### 브라우저 접속 주소와 OAuth 콜백 주소 분리
+
+데스크톱 승인·기기 해제의 POST는 Origin의 정확한 scheme/host/port와 요청 Host를 검사한다. 운영은 HTTPS만 허용하며 개발 HTTP는 loopback에 한정한다. Origin 누락·null·다른 host/port·경로·사용자 정보가 포함된 값은 거부한다. X-Forwarded-Host를 별도 허용 출처로 사용하지 않는다. 세션 ID와 동작에 묶인 HMAC CSRF 토큰을 64자리 hex로 검증하고 timingSafeEqual로 비교한다. Next.js Server Actions의 기본 Origin 검증도 유지한다. Discord redirect URI는 OAuth 등록 callback에만 사용하며 웹의 www 별칭으로 접속한 정상 승인 요청을 거부하지 않는다.
