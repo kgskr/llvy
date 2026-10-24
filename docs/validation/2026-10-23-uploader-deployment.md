@@ -37,3 +37,14 @@
 서버 배포와 실제 Windows 앱 릴리스는 별도 단계다. 네 역할의 실제 브라우저 권한 전환, Discord·Blob 업로드, 실제 Windows 연결·refresh·회수, 구버전 요청 drain과 운영 rollback은 아직 전체 수용 검증을 마치지 않았다. 따라서 `add-uploader-role`과 `add-desktop-replay-upload-api`는 열린 상태를 유지한다. 캐시도 모든 active writer 확인과 성능·전환 검증 전에는 활성화하지 않는다.
 
 연계 문서의 릴리스 상태 갱신 대상은 `llvy-uploader/contracts/desktop-v1/source.json`과 `llvy-wiki/wiki/uploader.md`다. 이번 서버 배포 기록만으로 앱 릴리스나 연계 저장소 문서 동기화 완료를 의미하지 않는다.
+
+## 2026-10-24 브라우저 승인 origin 수정
+
+운영 desktop API는 활성 상태였지만 www 주소의 승인 POST가 OAuth callback의 루트 origin과 다르다는 이유로 CSRF 검사에서 거부되었다. 검증 기준을 실제 요청 Host와 브라우저 Origin으로 수정하고 운영 HTTPS, 세션·동작별 HMAC 검증을 유지했다. 승인과 본인 기기 해제에 같은 검사를 적용한다. OAuth 설정·API 계약·DB·배포 exe는 변경하지 않았다.
+
+- 수정 commit: `b823961112bd811ab7c7f2cab71a591773c13ebe`.
+- 운영 배포: `dpl_6t5dDCUMHaecQ4REXUN5MfeJfvFS`, `llvy-5iukca04g-kimgs-projects.vercel.app`. READY와 www·루트 운영 도메인 할당을 확인했다.
+- Node 24의 `npm run check`: 테스트 991개 통과, 환경 조건에 따른 검사 93개 건너뜀. lint·typecheck·build·format 통과.
+- www/루트 callback 구분, 다른 origin/port, 운영 HTTP, Origin 누락·변형, 다른 세션/동작과 잘못된 토큰 등 새 회귀 25개 통과.
+- OpenSpec strict 28개 및 diff 검사 통과. 운영 무인증 session 401과 빈 인증 요청 400을 재확인했다.
+- 실제 Windows 앱의 승인·콜백·토큰 교환 재시도 결과는 별도 확인 대상이다. 전체 Windows·Discord·Blob 수용 검증과 change 아카이브 조건은 계속 미완료다. 기존 오류 페이지를 재사용하지 말고 앱에서 새 연결 요청을 시작한다.

@@ -81,4 +81,4 @@
 
 - [x] 15.1 OAuth callback과 실제 웹 origin을 분리해 same-origin·CSRF 검증을 수정한다.
 - [x] 15.2 www/루트·port·production HTTP·위조 origin/토큰·다른 session/action 회귀와 서버 check·strict를 검증한다.
-- [ ] 15.3 문서와 검증 범위를 갱신하고 수정 commit을 운영에 배포한다. 실제 Windows 재연결 결과는 별도로 확인한다.
+- [x] 15.3 문서와 검증 범위를 갱신하고 수정 commit을 운영에 배포한다. 실제 Windows 재연결 결과는 별도로 확인한다.
